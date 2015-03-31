@@ -249,6 +249,7 @@ extern bool initcall_debug;
 		__attribute__((__section__(__sec))) = fn;
 #endif
 
+<<<<<<< HEAD
 #define __unique_initcall(fn, id, __sec, __iid)			\
 	____define_initcall(fn,					\
 		__initcall_stub(fn, __iid, id),			\
@@ -257,6 +258,8 @@ extern bool initcall_debug;
 
 #define ___define_initcall(fn, id, __sec)			\
 	__unique_initcall(fn, id, __sec, __initcall_id(fn))
+	static initcall_t __initcall_##fn##id __used __noreorder \
+		__attribute__((__section__(#__sec ".init"))) = fn;
 
 #define __define_initcall(fn, id) ___define_initcall(fn, id, .initcall##id)
 
