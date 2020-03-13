@@ -19,6 +19,9 @@ int32_t fdt_ro_probe_(const void *fdt)
 {
 	uint32_t totalsize = fdt_totalsize(fdt);
 
+	if (can_assume(VALID_DTB))
+		return totalsize;
+
 	if (fdt_magic(fdt) == FDT_MAGIC) {
 		/* Complete tree */
 		if (!can_assume(LATEST)) {
@@ -134,17 +137,14 @@ const void *fdt_offset_ptr(const void *fdt, int offset, unsigned int len)
 	unsigned int uoffset = offset;
 	unsigned int absoffset = offset + fdt_off_dt_struct(fdt);
 
-	if (offset < 0)
-		return NULL;
-
 	if (!can_assume(VALID_INPUT))
-		if ((absoffset < uoffset)
+		if ((absoffset < offset)
 		    || ((absoffset + len) < absoffset)
 		    || (absoffset + len) > fdt_totalsize(fdt))
 			return NULL;
 
 	if (can_assume(LATEST) || fdt_version(fdt) >= 0x11)
-		if (((uoffset + len) < uoffset)
+		if (((offset + len) < offset)
 		    || ((offset + len) > fdt_size_dt_struct(fdt)))
 			return NULL;
 
@@ -207,11 +207,10 @@ uint32_t fdt_next_tag(const void *fdt, int startoffset, int *nextoffset)
 
 int fdt_check_node_offset_(const void *fdt, int offset)
 {
-	if (!can_assume(VALID_INPUT)
-	    && ((offset < 0) || (offset % FDT_TAGSIZE)))
-		return -FDT_ERR_BADOFFSET;
-
-	if (fdt_next_tag(fdt, offset, &offset) != FDT_BEGIN_NODE)
+	if (can_assume(VALID_INPUT))
+		return offset;
+	if ((offset < 0) || (offset % FDT_TAGSIZE)
+	    || (fdt_next_tag(fdt, offset, &offset) != FDT_BEGIN_NODE))
 		return -FDT_ERR_BADOFFSET;
 
 	return offset;
