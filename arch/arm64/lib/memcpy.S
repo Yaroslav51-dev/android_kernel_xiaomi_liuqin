@@ -1,13 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (C) 2013 ARM Ltd.
- * Copyright (C) 2013 Linaro.
+ * Copyright (c) 2012-2021, Arm Limited.
  *
- * This code is based on glibc cortex strings work originally authored by Linaro
- * be found @
- *
- * http://bazaar.launchpad.net/~linaro-toolchain-dev/cortex-strings/trunk/
- * files/head:/src/aarch64/
+ * Adapted from the original at:
+ * https://github.com/ARM-software/optimized-routines/blob/afd6244a1f8d9229/string/aarch64/memcpy.S
  */
 
 #include <linux/linkage.h>
@@ -64,3 +60,7 @@ SYM_FUNC_END_PI(memcpy)
 EXPORT_SYMBOL(memcpy)
 SYM_FUNC_END_ALIAS(__memcpy)
 EXPORT_SYMBOL(__memcpy)
+SYM_FUNC_END_ALIAS_PI(memmove)
+EXPORT_SYMBOL(memmove)
+SYM_FUNC_END_ALIAS(__memmove)
+EXPORT_SYMBOL(__memmove)
