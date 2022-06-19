@@ -209,13 +209,8 @@ static FORCE_INLINE int LZ4_decompress_generic(
 
 	/* Main Loop : decode sequences */
 	while (1) {
-		size_t length;
-		const BYTE *match;
-		size_t offset;
-
-		/* get literal length */
-		unsigned int const token = *ip++;
-		length = token>>ML_BITS;
+		token = *ip++;
+		length = token >> ML_BITS;
 
 		/* ip < iend before the increment */
 		assert(!endOnInput || ip <= iend);
