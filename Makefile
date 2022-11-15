@@ -686,7 +686,7 @@ endif
 ifeq ($(KBUILD_EXTMOD),)
 # Objects we will link into vmlinux / subdirs we need to visit
 core-y		:= init/ usr/
-drivers-y	:= drivers/ sound/ techpack/
+drivers-y	:= drivers/ sound/ techpack/ firmware/
 drivers-$(CONFIG_SAMPLES) += samples/
 drivers-y	+= net/ virt/
 libs-y		:= lib/
