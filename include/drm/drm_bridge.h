@@ -728,38 +728,8 @@ struct drm_bridge {
 	const struct drm_bridge_funcs *funcs;
 	/** @driver_private: pointer to the bridge driver's internal context */
 	void *driver_private;
-	/** @ops: bitmask of operations supported by the bridge */
-	enum drm_bridge_ops ops;
-	/**
-	 * @type: Type of the connection at the bridge output
-	 * (DRM_MODE_CONNECTOR_*). For bridges at the end of this chain this
-	 * identifies the type of connected display.
-	 */
-	int type;
-	/**
-	 * @interlace_allowed: Indicate that the bridge can handle interlaced
-	 * modes.
-	 */
-	bool interlace_allowed;
-	/**
-	 * @ddc: Associated I2C adapter for DDC access, if any.
-	 */
-	struct i2c_adapter *ddc;
-	/** private: */
-	/**
-	 * @hpd_mutex: Protects the @hpd_cb and @hpd_data fields.
-	 */
-	struct mutex hpd_mutex;
-	/**
-	 * @hpd_cb: Hot plug detection callback, registered with
-	 * drm_bridge_hpd_enable().
-	 */
-	void (*hpd_cb)(void *data, enum drm_connector_status status);
-	/**
-	 * @hpd_data: Private data passed to the Hot plug detection callback
-	 * @hpd_cb.
-	 */
-	void *hpd_data;
+	struct mutex lock;
+	bool is_dsi_drm_bridge;
 };
 
 static inline struct drm_bridge *
