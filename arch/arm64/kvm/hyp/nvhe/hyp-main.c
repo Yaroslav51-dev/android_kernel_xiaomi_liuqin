@@ -17,7 +17,30 @@
 #include <nvhe/mm.h>
 #include <nvhe/trap_handler.h>
 
-DEFINE_PER_CPU(struct kvm_nvhe_init_params, kvm_init_params);
+#include <linux/irqchip/arm-gic-v3.h>
+#include <uapi/linux/psci.h>
+
+#include "../../sys_regs.h"
+
+struct pkvm_loaded_state {
+	/* loaded vcpu is HYP VA */
+	struct kvm_vcpu			*vcpu;
+	bool				is_protected;
+
+	/*
+	 * Host FPSIMD state. Written to when the guest accesses its
+	 * own FPSIMD state, and read when the guest state is live and
+	 * that it needs to be switched back to the host.
+	 *
+	 * Only valid when the KVM_ARM64_FP_ENABLED flag is set in the
+	 * shadow structure.
+	 */
+	struct user_fpsimd_state	host_fpsimd_state;
+};
+
+static DEFINE_PER_CPU(struct pkvm_loaded_state, loaded_state);
+
+__visible DEFINE_PER_CPU(struct kvm_nvhe_init_params, kvm_init_params);
 
 void __kvm_hyp_host_forward_smc(struct kvm_cpu_context *host_ctxt);
 

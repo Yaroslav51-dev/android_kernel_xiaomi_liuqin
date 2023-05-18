@@ -20,6 +20,9 @@ struct hyp_pool hpool;
 struct kvm_pgtable_mm_ops pkvm_pgtable_mm_ops;
 unsigned long hyp_nr_cpus;
 
+__visible phys_addr_t pvmfw_base;
+__visible phys_addr_t pvmfw_size;
+
 #define hyp_percpu_size ((unsigned long)__per_cpu_end - \
 			 (unsigned long)__per_cpu_start)
 
