@@ -2241,6 +2241,243 @@ static int battery_chg_ship_mode(struct notifier_block *nb, unsigned long code,
 	return NOTIFY_DONE;
 }
 
+#if defined(CONFIG_OF) && defined(CONFIG_DRM_PANEL)
+static int charge_check_panel(struct device_node *np)
+{
+	int i;
+	int count;
+	struct device_node *node;
+	struct drm_panel *panel;
+
+	count = of_count_phandle_with_args(np, "panel", NULL);
+	if (count <= 0)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		node = of_parse_phandle(np, "panel", i);
+		panel = of_drm_find_panel(node);
+		of_node_put(node);
+		if (!IS_ERR(panel)) {
+			active_panel = panel;
+			return 0;
+		}else{
+			active_panel = NULL;
+		}
+	}
+	return PTR_ERR(panel);
+}
+
+static void screen_state_for_charge_callback(enum panel_event_notifier_tag notifier_tag,
+		struct panel_event_notification *notification, void *client_data)
+{
+	struct battery_chg_dev *bcdev = client_data;
+	if(!notification) {
+		return;
+	}
+
+	if(notification->notif_data.early_trigger) {
+		return;
+	}
+
+	if(notifier_tag == PANEL_EVENT_NOTIFICATION_PRIMARY) {
+		switch (notification->notif_type) {
+			case DRM_PANEL_EVENT_UNBLANK:
+				blank_state = 0;
+				break;
+			case DRM_PANEL_EVENT_BLANK:
+			case DRM_PANEL_EVENT_BLANK_LP:
+				blank_state = 1;
+				break;
+			case DRM_PANEL_EVENT_FPS_CHANGE:
+				return;
+			default:
+				return;
+		}
+		if (!bcdev->support_soc_update)
+			schedule_work(&bcdev->notify_blankstate_work);
+	} else if(notifier_tag == PANEL_EVENT_NOTIFICATION_SECONDARY) {
+		switch (notification->notif_type) {
+			case DRM_PANEL_EVENT_UNBLANK:
+				sec_blank_state = 0;
+				break;
+			case DRM_PANEL_EVENT_BLANK:
+			case DRM_PANEL_EVENT_BLANK_LP:
+				sec_blank_state = 1;
+				break;
+			case DRM_PANEL_EVENT_FPS_CHANGE:
+				return;
+			default:
+				return;
+		}
+		if (!bcdev->support_soc_update)
+			schedule_work(&bcdev->notify_blankstate_work);
+	}
+	return;
+
+}
+
+static void notify_blankstate_changed_work(struct work_struct *work)
+{
+	struct battery_chg_dev *bcdev = container_of(work, struct battery_chg_dev, notify_blankstate_work);
+	int rc;
+	int state;
+	state = blank_state & sec_blank_state;
+	rc = write_property_id(bcdev, &bcdev->psy_list[PSY_TYPE_XM],
+				XM_PROP_FB_BLANK_STATE, state);
+}
+static void qti_battery_register_panel_notifier_work(struct work_struct *work)
+{
+	struct device_node *node;
+	struct battery_chg_dev *pvt_data = container_of(work, struct battery_chg_dev, panel_notify_register_work.work);
+	int error = 0;
+	static int retry_count = 3;
+
+	node = of_find_node_by_name(NULL, "charge-screen");
+	if (!node) {
+		return;
+	}
+
+	error = charge_check_panel(node);
+
+	if (active_panel) {
+		cookie = panel_event_notifier_register(PANEL_EVENT_NOTIFICATION_PRIMARY,
+				PANEL_EVENT_NOTIFIER_CLIENT_CHARGE, active_panel,
+				screen_state_for_charge_callback, (void *)pvt_data);
+	} else if(retry_count > 0){
+		retry_count--;
+		schedule_delayed_work(&pvt_data ->panel_notify_register_work, msecs_to_jiffies(5000));
+
+	}
+}
+
+static int charge_check_panel_sec(struct device_node *np)
+{
+	int i;
+	int count;
+	struct device_node *node;
+	struct drm_panel *panel;
+
+	count = of_count_phandle_with_args(np, "panel_sec", NULL);
+	if (count <= 0)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		node = of_parse_phandle(np, "panel_sec", i);
+		panel = of_drm_find_panel(node);
+		of_node_put(node);
+		if (!IS_ERR(panel)) {
+			active_panel_sec = panel;
+			return 0;
+		}else{
+			active_panel_sec = NULL;
+		}
+	}
+	return PTR_ERR(panel);
+}
+
+static void qti_battery_register_panel_sec_notifier_work(struct work_struct *work)
+{
+	struct device_node *node;
+	struct battery_chg_dev *pvt_data = container_of(work, struct battery_chg_dev, panel_sec_notify_register_work.work);
+	int error = 0;
+	static int retry_count = 3;
+
+	node = of_find_node_by_name(NULL, "charge-screen");
+	if (!node) {
+		return;
+	}
+
+	error = charge_check_panel_sec(node);
+
+	if (active_panel_sec) {
+		cookie1 = panel_event_notifier_register(PANEL_EVENT_NOTIFICATION_SECONDARY,
+				PANEL_EVENT_NOTIFIER_CLIENT_CHARGE_SECOND, active_panel_sec,
+				screen_state_for_charge_callback, (void *)pvt_data);
+	} else if(retry_count > 0){
+		retry_count--;
+		schedule_delayed_work(&pvt_data ->panel_sec_notify_register_work, msecs_to_jiffies(5000));
+
+	}
+}
+#endif
+
+#define MAX_UEVENT_LENGTH 50
+static int add_xiaomi_uevent(struct device *dev, struct kobj_uevent_env *env)
+{
+	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
+	struct battery_chg_dev *bcdev = platform_get_drvdata(pdev);
+
+	char *prop_buf = NULL;
+	char uevent_string[MAX_UEVENT_LENGTH+1];
+
+	prop_buf = (char *)get_zeroed_page(GFP_KERNEL);
+	if (!prop_buf)
+		return 0;
+
+#if defined(CONFIG_MI_WIRELESS)
+	reverse_chg_state_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_REVERSE_CHG_STATE=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+
+	reverse_chg_mode_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_REVERSE_CHG_MODE=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	tx_mac_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_TX_MAC=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	rx_cep_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_RX_CEP=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	rx_cr_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_RX_CR=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	wls_fw_state_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_WLS_FW_STATE=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	wls_car_adapter_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_WLS_CAR_ADAPTER=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	tx_adapter_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_TX_ADAPTER=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+#endif
+
+	soc_decimal_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_SOC_DECIMAL=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	soc_decimal_rate_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_SOC_DECIMAL_RATE=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	shutdown_delay_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_SHUTDOWN_DELAY=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	quick_charge_type_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_QUICK_CHARGE_TYPE=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	connector_temp_show( &(bcdev->battery_class), NULL, prop_buf);
+	snprintf(uevent_string, MAX_UEVENT_LENGTH, "POWER_SUPPLY_CONNECTOR_TEMP=%s", prop_buf);
+	add_uevent_var(env, uevent_string);
+
+	free_page((unsigned long)prop_buf);
+	return 0;
+}
+
+static struct device_type dev_type_xiaomi_uevent = {
+	.name = "dev_type_xiaomi_uevent",
+	.uevent = add_xiaomi_uevent,
+};
+
 static void panel_event_notifier_callback(enum panel_event_notifier_tag tag,
 			struct panel_event_notification *notification, void *data)
 {
