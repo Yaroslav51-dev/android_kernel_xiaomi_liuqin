@@ -9,6 +9,8 @@
 #include <linux/device.h>
 #include <linux/types.h>
 
+#define UR_AUTO_RESUME_SUPPORTED	BIT(0)
+
 struct usb_repeater  {
 	struct device		*dev;
 	const char		*label;
@@ -16,7 +18,7 @@ struct usb_repeater  {
 
 	struct list_head	head;
 	int	(*reset)(struct usb_repeater *x, bool bring_out_of_reset);
-	int	(*init)(struct usb_repeater *x, unsigned int flags);
+	int	(*init)(struct usb_repeater *x);
 	int	(*suspend)(struct usb_repeater *r, int suspend);
 	int	(*powerup)(struct usb_repeater *r);
 	int	(*powerdown)(struct usb_repeater *r);
@@ -58,10 +60,10 @@ static inline int usb_repeater_reset(struct usb_repeater *r,
 		return 0;
 }
 
-static inline int usb_repeater_init(struct usb_repeater *r, unsigned int flags)
+static inline int usb_repeater_init(struct usb_repeater *r)
 {
 	if (r && r->init != NULL)
-		return r->init(r, flags);
+		return r->init(r);
 	else
 		return 0;
 }

@@ -56,12 +56,12 @@
 #include <linux/kthread.h>
 #include <linux/qcom_dma_heap.h>
 #include <uapi/linux/sched/types.h>
+#include <linux/page_owner.h>
 
 #include "qcom_dma_heap_secure_utils.h"
 #include "qcom_dynamic_page_pool.h"
 #include "qcom_sg_ops.h"
 #include "qcom_system_heap.h"
-#include "qcom_extend_system_heap.h"
 
 #define DYNAMIC_POOL_FILL_MARK (100 * SZ_1M)
 #define DYNAMIC_POOL_LOW_MARK_PERCENT 40UL
@@ -69,8 +69,6 @@
 
 #define DYNAMIC_POOL_REFILL_DEFER_WINDOW_MS 10
 #define DYNAMIC_POOL_KTHREAD_NICE_VAL 10
-
-u64 totalram;
 
 static int get_dynamic_pool_fillmark(struct dynamic_page_pool *pool)
 {
@@ -190,7 +188,6 @@ static void system_heap_buf_free(struct deferred_freelist_item *item,
 	struct sg_table *table;
 	struct scatterlist *sg;
 	int i, j;
-	bool pool_max_enable = (msm_total_pools_max > 0UL) ? true : false;
 
 	buffer = container_of(item, struct qcom_sg_buffer, deferred_free);
 	sys_heap = dma_heap_get_drvdata(buffer->heap);
@@ -202,18 +199,15 @@ static void system_heap_buf_free(struct deferred_freelist_item *item,
 	table = &buffer->sg_table;
 	for_each_sg(table->sgl, sg, table->nents, i) {
 		struct page *page = sg_page(sg);
-		if ((reason == DF_UNDER_PRESSURE) || (pool_max_enable && (atomic_read(&msm_total_pools_size) >= msm_total_pools_max))) {
+
+		if (reason == DF_UNDER_PRESSURE) {
 			__free_pages(page, compound_order(page));
 		} else {
 			for (j = 0; j < NUM_ORDERS; j++) {
 				if (compound_order(page) == orders[j])
 					break;
 			}
-			if (dynamic_pool_fillmark_reached(sys_heap->pool_list[j]) &&
-					need_free_to_reserve_pool(sys_heap, j))
-				dynamic_page_pool_free(sys_heap->reserve_pool_list[j], page);
-			else
-				dynamic_page_pool_free(sys_heap->pool_list[j], page);
+			dynamic_page_pool_free(sys_heap->pool_list[j], page);
 		}
 	}
 	sg_free_table(table);
@@ -257,6 +251,8 @@ struct page *qcom_sys_heap_alloc_largest_available(struct dynamic_page_pool **po
 		    pools[i]->order &&
 		    dynamic_pool_count_below_lowmark(pools[i]))
 			wake_up_process(pools[i]->refill_worker);
+
+		set_page_owner(page, pools[i]->order, GFP_KERNEL);
 
 		return page;
 	}
@@ -303,14 +299,9 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 		if (fatal_signal_pending(current))
 			goto free_buffer;
 
-		if (sys_heap->reserve_extend_info.use_reserve_pool)
-			page = qcom_extend_sys_heap_alloc_largest_available(sys_heap,
-									     size_remaining,
-									     max_order);
-		else
-			page = qcom_sys_heap_alloc_largest_available(sys_heap->pool_list,
-								     size_remaining,
-								     max_order);
+		page = qcom_sys_heap_alloc_largest_available(sys_heap->pool_list,
+							     size_remaining,
+							     max_order);
 		if (!page)
 			goto free_buffer;
 
@@ -424,11 +415,6 @@ void qcom_system_heap_create(const char *name, const char *system_alias, bool un
 	struct sched_attr attr = { .sched_nice = DYNAMIC_POOL_KTHREAD_NICE_VAL };
 	int ret;
 	int i;
-	struct sysinfo sinfo;
-
-	si_meminfo(&sinfo);
-	totalram = sinfo.totalram;
-
 
 	ret = dynamic_page_pool_init_shrinker();
 	if (ret)
@@ -473,7 +459,6 @@ void qcom_system_heap_create(const char *name, const char *system_alias, bool un
 			sys_heap->pool_list[i]->refill_worker = refill_worker;
 	}
 
-	qcom_sys_heap_reserve_pool_init(name, sys_heap);
 	heap = dma_heap_add(&exp_info);
 	if (IS_ERR(heap)) {
 		ret = PTR_ERR(heap);

@@ -12,9 +12,11 @@ obj-$(CONFIG_IIO_CONFIGFS) += industrialio-configfs.o
 obj-$(CONFIG_IIO_SW_DEVICE) += industrialio-sw-device.o
 obj-$(CONFIG_IIO_SW_TRIGGER) += industrialio-sw-trigger.o
 obj-$(CONFIG_IIO_TRIGGERED_EVENT) += industrialio-triggered-event.o
+obj-$(CONFIG_IPD) += ipd.o
 
 obj-y += accel/
 obj-y += adc/
+obj-y += addac/
 obj-y += afe/
 obj-y += amplifiers/
 obj-y += buffer/
@@ -39,4 +41,3 @@ obj-y += proximity/
 obj-y += resolver/
 obj-y += temperature/
 obj-y += trigger/
-obj-$(CONFIG_HEALTH_GOODIX) += goodix_health/
