@@ -1963,6 +1963,8 @@ static int hdmi_add_cvt(struct hda_codec *codec, hda_nid_t cvt_nid)
 }
 
 static const struct snd_pci_quirk force_connect_list[] = {
+	SND_PCI_QUIRK(0x103c, 0x83e2, "HP EliteDesk 800 G4", 1),
+	SND_PCI_QUIRK(0x103c, 0x83ef, "HP MP9 G4 Retail System AMS", 1),
 	SND_PCI_QUIRK(0x103c, 0x870f, "HP", 1),
 	SND_PCI_QUIRK(0x103c, 0x871a, "HP", 1),
 	SND_PCI_QUIRK(0x103c, 0x8711, "HP", 1),
@@ -3634,6 +3636,26 @@ static int nvhdmi_chmap_validate(struct hdac_chmap *chmap,
 	return 0;
 }
 
+/* map from pin NID to port; port is 0-based */
+/* for Nvidia: assume widget NID starting from 4, with step 1 (4, 5, 6, ...) */
+static int nvhdmi_pin2port(void *audio_ptr, int pin_nid)
+{
+	return pin_nid - 4;
+}
+
+/* reverse-map from port to pin NID: see above */
+static int nvhdmi_port2pin(struct hda_codec *codec, int port)
+{
+	return port + 4;
+}
+
+static const struct drm_audio_component_audio_ops nvhdmi_audio_ops = {
+	.pin2port = nvhdmi_pin2port,
+	.pin_eld_notify = generic_acomp_pin_eld_notify,
+	.master_bind = generic_acomp_master_bind,
+	.master_unbind = generic_acomp_master_unbind,
+};
+
 static int patch_nvhdmi(struct hda_codec *codec)
 {
 	struct hdmi_spec *spec;
@@ -3663,6 +3685,8 @@ static int patch_nvhdmi(struct hda_codec *codec)
 	spec->nv_dp_workaround = true;
 
 	codec->link_down_at_suspend = 1;
+
+	generic_acomp_init(codec, &nvhdmi_audio_ops, nvhdmi_port2pin);
 
 	return 0;
 }

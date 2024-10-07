@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -11,9 +10,6 @@
 #include <linux/workqueue.h>
 
 #include "pdr_internal.h"
-#include "../../remoteproc/qcom_common.h"
-
-#define PDR_IND_NOTIF_TIMEOUT CONFIG_PDR_INDICATION_NOTIF_TIMEOUT
 
 struct pdr_service {
 	char service_name[SERVREG_NAME_LENGTH + 1];
@@ -71,11 +67,7 @@ struct pdr_list_node {
 	u16 transaction_id;
 	struct pdr_service *pds;
 	struct list_head node;
-	struct timer_list timer;
 };
-
-static const char * const ind_notif_timeout_msg =
-	"PDR: Indication notifier %s, state: 0x%x, trans-id: %d\n taking too long";
 
 static int pdr_locator_new_server(struct qmi_handle *qmi,
 				  struct qmi_service *svc)
@@ -84,12 +76,12 @@ static int pdr_locator_new_server(struct qmi_handle *qmi,
 					      locator_hdl);
 	struct pdr_service *pds;
 
+	mutex_lock(&pdr->lock);
 	/* Create a local client port for QMI communication */
 	pdr->locator_addr.sq_family = AF_QIPCRTR;
 	pdr->locator_addr.sq_node = svc->node;
 	pdr->locator_addr.sq_port = svc->port;
 
-	mutex_lock(&pdr->lock);
 	pdr->locator_init_complete = true;
 	mutex_unlock(&pdr->lock);
 
@@ -112,10 +104,10 @@ static void pdr_locator_del_server(struct qmi_handle *qmi,
 
 	mutex_lock(&pdr->lock);
 	pdr->locator_init_complete = false;
-	mutex_unlock(&pdr->lock);
 
 	pdr->locator_addr.sq_node = 0;
 	pdr->locator_addr.sq_port = 0;
+	mutex_unlock(&pdr->lock);
 }
 
 static struct qmi_ops pdr_locator_ops = {
@@ -278,45 +270,23 @@ static int pdr_send_indack_msg(struct pdr_handle *pdr, struct pdr_service *pds,
 	return ret;
 }
 
-static void ind_notif_timeout_handler(struct timer_list *t)
-{
-	struct pdr_list_node *ind = from_timer(ind, t, timer);
-	struct pdr_service *pds = ind->pds;
-
-	if (IS_ENABLED(CONFIG_QCOM_PANIC_ON_PDR_NOTIF_TIMEOUT) &&
-	    system_state != SYSTEM_RESTART &&
-	    system_state != SYSTEM_POWER_OFF &&
-	    system_state != SYSTEM_HALT &&
-	    !qcom_device_shutdown_in_progress)
-		panic(ind_notif_timeout_msg, pds->service_path, pds->state, ind->transaction_id);
-	else
-		WARN(1, ind_notif_timeout_msg, pds->service_path, pds->state, ind->transaction_id);
-}
-
 static void pdr_indack_work(struct work_struct *work)
 {
 	struct pdr_handle *pdr = container_of(work, struct pdr_handle,
 					      indack_work);
 	struct pdr_list_node *ind, *tmp;
 	struct pdr_service *pds;
-	unsigned long timeout;
 
 	list_for_each_entry_safe(ind, tmp, &pdr->indack_list, node) {
 		pds = ind->pds;
 
 		mutex_lock(&pdr->status_lock);
 		pds->state = ind->curr_state;
-		timeout = jiffies + msecs_to_jiffies(PDR_IND_NOTIF_TIMEOUT);
-		mod_timer(&ind->timer, timeout);
 		pdr->status(pds->state, pds->service_path, pdr->priv);
-		del_timer_sync(&ind->timer);
 		mutex_unlock(&pdr->status_lock);
 
 		/* Ack the indication after clients release the PD resources */
 		pdr_send_indack_msg(pdr, pds, ind->transaction_id);
-
-		pr_info("PDR: Indication ack sent to %s, state: 0x%x, trans-id: %d\n",
-			pds->service_path, pds->state, ind->transaction_id);
 
 		mutex_lock(&pdr->list_lock);
 		list_del(&ind->node);
@@ -366,7 +336,6 @@ static void pdr_indication_cb(struct qmi_handle *qmi,
 	ind->curr_state = ind_msg->curr_state;
 	ind->pds = pds;
 
-	timer_setup(&ind->timer, ind_notif_timeout_handler, 0);
 	mutex_lock(&pdr->list_lock);
 	list_add_tail(&ind->node, &pdr->indack_list);
 	mutex_unlock(&pdr->list_lock);
@@ -397,12 +366,14 @@ static int pdr_get_domain_list(struct servreg_get_domain_list_req *req,
 	if (ret < 0)
 		return ret;
 
+	mutex_lock(&pdr->lock);
 	ret = qmi_send_request(&pdr->locator_hdl,
 			       &pdr->locator_addr,
 			       &txn, SERVREG_GET_DOMAIN_LIST_REQ,
 			       SERVREG_GET_DOMAIN_LIST_REQ_MAX_LEN,
 			       servreg_get_domain_list_req_ei,
 			       req);
+	mutex_unlock(&pdr->lock);
 	if (ret < 0) {
 		qmi_txn_cancel(&txn);
 		return ret;
@@ -447,7 +418,7 @@ static int pdr_locate_service(struct pdr_handle *pdr, struct pdr_service *pds)
 		if (ret < 0)
 			goto out;
 
-		for (i = domains_read; i < resp->domain_list_len; i++) {
+		for (i = 0; i < resp->domain_list_len; i++) {
 			entry = &resp->domain_list[i];
 
 			if (strnlen(entry->name, sizeof(entry->name)) == sizeof(entry->name))
@@ -479,8 +450,8 @@ static void pdr_notify_lookup_failure(struct pdr_handle *pdr,
 				      struct pdr_service *pds,
 				      int err)
 {
-	pr_err("PDR: service lookup for %s:%s failed: %d\n",
-		pds->service_path, pds->service_name, err);
+	pr_err("PDR: service lookup for %s failed: %d\n",
+	       pds->service_name, err);
 
 	if (err == -ENXIO)
 		return;

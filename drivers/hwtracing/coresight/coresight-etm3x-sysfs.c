@@ -47,14 +47,8 @@ static ssize_t etmsr_show(struct device *dev,
 {
 	unsigned long flags, val;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
-	int ret;
 
-	ret = pm_runtime_get_sync(dev->parent);
-	if (ret < 0) {
-		pm_runtime_put_noidle(dev->parent);
-		return ret;
-	}
-
+	pm_runtime_get_sync(dev->parent);
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	CS_UNLOCK(drvdata->base);
 
@@ -945,19 +939,13 @@ static ssize_t seq_curr_state_show(struct device *dev,
 	unsigned long val, flags;
 	struct etm_drvdata *drvdata = dev_get_drvdata(dev->parent);
 	struct etm_config *config = &drvdata->config;
-	int ret;
 
 	if (!local_read(&drvdata->mode)) {
 		val = config->seq_curr_state;
 		goto out;
 	}
 
-	ret = pm_runtime_get_sync(dev->parent);
-	if (ret < 0) {
-		pm_runtime_put_noidle(dev->parent);
-		return ret;
-	}
-
+	pm_runtime_get_sync(dev->parent);
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
 	CS_UNLOCK(drvdata->base);

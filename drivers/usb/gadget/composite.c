@@ -490,51 +490,6 @@ int usb_interface_id(struct usb_configuration *config,
 }
 EXPORT_SYMBOL_GPL(usb_interface_id);
 
-#ifdef CONFIG_USB_FUNC_WAKEUP_SUPPORTED
-int usb_func_wakeup(struct usb_function *func)
-{
-	int ret, id;
-	unsigned long flags;
-
-	if (!func || !func->config || !func->config->cdev ||
-		!func->config->cdev->gadget)
-		return -EINVAL;
-
-	DBG(func->config->cdev, "%s function wakeup\n", func->name);
-
-	spin_lock_irqsave(&func->config->cdev->lock, flags);
-
-	for (id = 0; id < MAX_CONFIG_INTERFACES; id++)
-		if (func->config->interface[id] == func)
-			break;
-
-	if (id == MAX_CONFIG_INTERFACES) {
-		ERROR(func->config->cdev, "Invalid function id:%d\n", id);
-		ret = -EINVAL;
-		goto err;
-	}
-
-	ret = usb_gadget_func_wakeup(func->config->cdev->gadget, id);
-
-	if (ret == -EAGAIN) {
-		DBG(func->config->cdev,
-			"Function wakeup for %s could not complete due to suspend state. Delayed until after bus resume.\n",
-			func->name ? func->name : "");
-		ret = 0;
-	} else if (ret < 0 && ret != -ENOTSUPP) {
-		ERROR(func->config->cdev,
-			"Failed to wake function %s from suspend state. ret=%d. Canceling USB request.\n",
-			func->name ? func->name : "", ret);
-	}
-
-err:
-	spin_unlock_irqrestore(&func->config->cdev->lock, flags);
-
-	return ret;
-}
-EXPORT_SYMBOL(usb_func_wakeup);
-#endif
-
 static u8 encode_bMaxPower(enum usb_device_speed speed,
 		struct usb_configuration *c)
 {
@@ -2014,7 +1969,7 @@ unknown:
 			buf[5] = 0x01;
 			switch (ctrl->bRequestType & USB_RECIP_MASK) {
 			case USB_RECIP_DEVICE:
-				if (w_index != 0x4 || (w_value >> 8))
+				if (w_index != 0x4 || (w_value & 0xff))
 					break;
 				buf[6] = w_index;
 				/* Number of ext compat interfaces */
@@ -2030,9 +1985,9 @@ unknown:
 				}
 				break;
 			case USB_RECIP_INTERFACE:
-				if (w_index != 0x5 || (w_value >> 8))
+				if (w_index != 0x5 || (w_value & 0xff))
 					break;
-				interface = w_value & 0xFF;
+				interface = w_value >> 8;
 				if (interface >= MAX_CONFIG_INTERFACES ||
 				    !os_desc_cfg->interface[interface])
 					break;

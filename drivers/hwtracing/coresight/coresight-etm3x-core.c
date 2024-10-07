@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2011-2012, 2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * Description: CoreSight Program Flow Trace driver
  */
@@ -455,7 +455,6 @@ int etm_get_trace_id(struct etm_drvdata *drvdata)
 	unsigned long flags;
 	int trace_id = -1;
 	struct device *etm_dev;
-	int ret;
 
 	if (!drvdata)
 		goto out;
@@ -464,11 +463,7 @@ int etm_get_trace_id(struct etm_drvdata *drvdata)
 	if (!local_read(&drvdata->mode))
 		return drvdata->traceid;
 
-	ret = pm_runtime_get_sync(etm_dev);
-	if (ret < 0) {
-		pm_runtime_put_noidle(etm_dev);
-		return ret;
-	}
+	pm_runtime_get_sync(etm_dev);
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
