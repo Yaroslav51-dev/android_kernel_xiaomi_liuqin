@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt) "icnss2_qmi: " fmt
@@ -31,7 +31,6 @@
 #include "qmi.h"
 #include "debug.h"
 #include "genl.h"
-#include "hwid.h"
 
 #define WLFW_SERVICE_WCN_INS_ID_V01	3
 #define WLFW_SERVICE_INS_ID_V01		0
@@ -43,10 +42,7 @@
 #define ELF_BDF_FILE_NAME_PREFIX	"bdwlan.e"
 #define BIN_BDF_FILE_NAME		"bdwlan.bin"
 #define BIN_BDF_FILE_NAME_PREFIX	"bdwlan."
-#define ELF_BDF_FILE_NAME_L9S		"bd_l9s.elf"
-#define ELF_BDF_FILE_NAME_L9S_GLOBAL	"bd_l9sgl.elf"
 #define REGDB_FILE_NAME			"regdb.bin"
-#define REGDB_FILE_NAME_XIAOMI		"regdb_xiaomi.bin"
 
 #define QDSS_TRACE_CONFIG_FILE "qdss_trace_config.cfg"
 
@@ -57,6 +53,9 @@
 #define DMS_MAC_NOT_PROVISIONED		16
 #define BDWLAN_SIZE			6
 #define UMC_CHIP_ID                    0x4320
+#define MAX_SHADOW_REG_RESERVED		2
+#define MAX_NUM_SHADOW_REG_V3		(QMI_WLFW_MAX_NUM_SHADOW_REG_V3_USAGE_V01 - \
+					MAX_SHADOW_REG_RESERVED)
 
 #ifdef CONFIG_ICNSS2_DEBUG
 bool ignore_fw_timeout;
@@ -548,7 +547,8 @@ int wlfw_ind_register_send_sync_msg(struct icnss_priv *priv)
 			req->rejuvenate_enable_valid = 1;
 			req->rejuvenate_enable = 1;
 		}
-	} else if (priv->device_id == WCN6750_DEVICE_ID) {
+	} else if (priv->device_id == WCN6750_DEVICE_ID ||
+		   priv->device_id == WCN6450_DEVICE_ID) {
 		req->fw_init_done_enable_valid = 1;
 		req->fw_init_done_enable = 1;
 		req->cal_done_enable_valid = 1;
@@ -1014,28 +1014,15 @@ static int icnss_get_bdf_file_name(struct icnss_priv *priv,
 	char foundry_specific_filename[ICNSS_MAX_FILE_NAME];
 	int ret = 0;
 
-	uint32_t hw_platform_ver = 0;
-	uint32_t hw_country_ver = 0;
-	hw_country_ver = get_hw_country_version();
-	hw_platform_ver = get_hw_version_platform();
-
 	switch (bdf_type) {
 	case ICNSS_BDF_ELF:
-		if (priv->board_id == 0xFF) {
-		        if (hw_platform_ver == HARDWARE_PROJECT_L9S) {
-				if ((uint32_t)CountryGlobal == hw_country_ver)
-					snprintf(filename_tmp, filename_len,
-						ELF_BDF_FILE_NAME_L9S_GLOBAL);
-				else
-					snprintf(filename_tmp, filename_len,
-						ELF_BDF_FILE_NAME_L9S);
-			} else
-			        snprintf(filename_tmp, filename_len, ELF_BDF_FILE_NAME);
-		} else if (priv->board_id < 0xFF) {
+		if (priv->board_id == 0xFF)
+			snprintf(filename_tmp, filename_len, ELF_BDF_FILE_NAME);
+		else if (priv->board_id < 0xFF)
 			snprintf(filename_tmp, filename_len,
 				 ELF_BDF_FILE_NAME_PREFIX "%02x",
 				 priv->board_id);
-		} else
+		else
 			snprintf(filename_tmp, filename_len,
 				 BDF_FILE_NAME_PREFIX "%02x.e%02x",
 				 priv->board_id >> 8 & 0xFF,
@@ -1063,7 +1050,7 @@ static int icnss_get_bdf_file_name(struct icnss_priv *priv,
 		}
 		break;
 	case ICNSS_BDF_REGDB:
-		snprintf(filename_tmp, filename_len, REGDB_FILE_NAME_XIAOMI);
+		snprintf(filename_tmp, filename_len, REGDB_FILE_NAME);
 		break;
 	default:
 		icnss_pr_err("Invalid BDF type: %d\n",
@@ -1286,7 +1273,8 @@ int icnss_wlfw_qdss_data_send_sync(struct icnss_priv *priv, char *file_name,
 		     resp->total_size == total_size) &&
 		    (resp->seg_id_valid == 1 && resp->seg_id == req->seg_id) &&
 		    (resp->data_valid == 1 &&
-		     resp->data_len <= QMI_WLFW_MAX_DATA_SIZE_V01)) {
+		     resp->data_len <= QMI_WLFW_MAX_DATA_SIZE_V01) &&
+		    resp->data_len <= remaining) {
 			memcpy(p_qdss_trace_data_temp,
 			       resp->data, resp->data_len);
 		} else {
@@ -1481,6 +1469,13 @@ int wlfw_wlan_mode_send_sync_msg(struct icnss_priv *priv,
 	req->mode = mode;
 	req->hw_debug_valid = 1;
 	req->hw_debug = !!test_bit(HW_DEBUG_ENABLE, &priv->ctrl_params.quirks);
+
+	if (priv->wlan_en_delay_ms >= 100) {
+		icnss_pr_dbg("Setting WLAN_EN delay: %d ms\n",
+			     priv->wlan_en_delay_ms);
+		req->wlan_en_delay_valid = 1;
+		req->wlan_en_delay = priv->wlan_en_delay_ms;
+	}
 
 	priv->stats.mode_req++;
 
@@ -2173,7 +2168,7 @@ int wlfw_qdss_trace_mem_info_send_sync(struct icnss_priv *priv)
 
 	req->mem_seg_len = priv->qdss_mem_seg_len;
 
-	if (priv->qdss_mem_seg_len > QMI_WLFW_MAX_NUM_MEM_SEG) {
+	if (priv->qdss_mem_seg_len >  QMI_WLFW_MAX_NUM_MEM_SEG_V01) {
 		icnss_pr_err("Invalid seg len %u\n",
 			     priv->qdss_mem_seg_len);
 		ret = -EINVAL;
@@ -2572,7 +2567,7 @@ static void wlfw_qdss_trace_req_mem_ind_cb(struct qmi_handle *qmi,
 
 	priv->qdss_mem_seg_len = ind_msg->mem_seg_len;
 
-	if (priv->qdss_mem_seg_len > QMI_WLFW_MAX_NUM_MEM_SEG) {
+	if (priv->qdss_mem_seg_len > QMI_WLFW_MAX_NUM_MEM_SEG_V01) {
 		icnss_pr_err("Invalid seg len %u\n",
 			     priv->qdss_mem_seg_len);
 		return;
@@ -2976,7 +2971,8 @@ int icnss_register_fw_service(struct icnss_priv *priv)
 	if (ret < 0)
 		return ret;
 
-	if (priv->device_id == WCN6750_DEVICE_ID)
+	if (priv->device_id == WCN6750_DEVICE_ID ||
+	    priv->device_id == WCN6450_DEVICE_ID)
 		ret = qmi_add_lookup(&priv->qmi, WLFW_SERVICE_ID_V01,
 				     WLFW_SERVICE_VERS_V01,
 				     WLFW_SERVICE_WCN_INS_ID_V01);
@@ -3067,6 +3063,17 @@ int icnss_send_wlan_enable_to_fw(struct icnss_priv *priv,
 
 		memcpy(req.shadow_reg, config->shadow_reg_cfg,
 		       sizeof(struct wlfw_msi_cfg_s_v01) * req.shadow_reg_len);
+	} else if (priv->device_id == WCN6450_DEVICE_ID) {
+		req.shadow_reg_v3_valid = 1;
+		if (config->num_shadow_reg_v3_cfg >
+			MAX_NUM_SHADOW_REG_V3)
+			req.shadow_reg_v3_len = MAX_NUM_SHADOW_REG_V3;
+		else
+			req.shadow_reg_v3_len = config->num_shadow_reg_v3_cfg;
+
+		memcpy(req.shadow_reg_v3, config->shadow_reg_v3_cfg,
+		       sizeof(struct wlfw_shadow_reg_v3_cfg_s_v01)
+		       * req.shadow_reg_v3_len);
 	}
 
 	ret = wlfw_wlan_cfg_send_sync_msg(priv, &req);

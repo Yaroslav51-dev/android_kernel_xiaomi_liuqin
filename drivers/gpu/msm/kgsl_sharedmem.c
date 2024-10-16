@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -199,7 +200,7 @@ static ssize_t memtype_sysfs_show(struct kobject *kobj,
 	}
 	spin_unlock(&priv->mem_lock);
 
-	queue_work(kgsl_driver.mem_workqueue, &work->work);
+	queue_work(kgsl_driver.lockless_workqueue, &work->work);
 
 	return scnprintf(buf, PAGE_SIZE, "%llu\n", size);
 }
@@ -274,7 +275,7 @@ imported_mem_show(struct kgsl_process_private *priv,
 	}
 	spin_unlock(&priv->mem_lock);
 
-	queue_work(kgsl_driver.mem_workqueue, &work->work);
+	queue_work(kgsl_driver.lockless_workqueue, &work->work);
 
 	return scnprintf(buf, PAGE_SIZE, "%llu\n", imported_mem);
 }
@@ -587,7 +588,7 @@ done:
 
 #include <soc/qcom/secure_buffer.h>
 
-static int lock_sgt(struct sg_table *sgt, u64 size)
+int kgsl_lock_sgt(struct sg_table *sgt, u64 size)
 {
 	int dest_perms = PERM_READ | PERM_WRITE;
 	int source_vm = VMID_HLOS;
@@ -617,7 +618,7 @@ static int lock_sgt(struct sg_table *sgt, u64 size)
 	return 0;
 }
 
-static int unlock_sgt(struct sg_table *sgt)
+int kgsl_unlock_sgt(struct sg_table *sgt)
 {
 	int dest_perms = PERM_READ | PERM_WRITE | PERM_EXEC;
 	int source_vm = VMID_CP_PIXEL;
@@ -646,7 +647,25 @@ static int kgsl_paged_map_kernel(struct kgsl_memdesc *memdesc)
 
 	mutex_lock(&kernel_map_global_lock);
 	if ((!memdesc->hostptr) && (memdesc->pages != NULL)) {
-		pgprot_t page_prot = pgprot_writecombine(PAGE_KERNEL);
+		pgprot_t page_prot;
+		int cache;
+
+		/* Determine user-side caching policy */
+		cache = kgsl_memdesc_get_cachemode(memdesc);
+		switch (cache) {
+		case KGSL_CACHEMODE_WRITETHROUGH:
+			page_prot = PAGE_KERNEL;
+			WARN_ONCE(1, "WRITETHROUGH is deprecated for arm64");
+			break;
+		case KGSL_CACHEMODE_WRITEBACK:
+			page_prot = PAGE_KERNEL;
+			break;
+		case KGSL_CACHEMODE_UNCACHED:
+		case KGSL_CACHEMODE_WRITECOMBINE:
+		default:
+			page_prot = pgprot_writecombine(PAGE_KERNEL);
+			break;
+		}
 
 		memdesc->hostptr = vmap(memdesc->pages, memdesc->page_count,
 					VM_IOREMAP, page_prot);
@@ -827,7 +846,7 @@ void kgsl_free_secure_page(struct page *page)
 	sg_init_table(&sgl, 1);
 	sg_set_page(&sgl, page, PAGE_SIZE, 0);
 
-	unlock_sgt(&sgt);
+	kgsl_unlock_sgt(&sgt);
 	__free_page(page);
 }
 
@@ -849,7 +868,7 @@ struct page *kgsl_alloc_secure_page(void)
 	sg_init_table(&sgl, 1);
 	sg_set_page(&sgl, page, PAGE_SIZE, 0);
 
-	status = lock_sgt(&sgt, PAGE_SIZE);
+	status = kgsl_lock_sgt(&sgt, PAGE_SIZE);
 	if (status) {
 		if (status == -EADDRNOTAVAIL)
 			return NULL;
@@ -1025,6 +1044,9 @@ static void kgsl_contiguous_free(struct kgsl_memdesc *memdesc)
 	if (!memdesc->hostptr)
 		return;
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.coherent);
 
 	_kgsl_contiguous_free(memdesc);
@@ -1069,6 +1091,7 @@ static int kgsl_memdesc_file_setup(struct kgsl_memdesc *memdesc, uint64_t size)
 		return ret;
 	}
 
+	mapping_set_unevictable(memdesc->shmem_filp->f_mapping);
 	return 0;
 }
 
@@ -1260,8 +1283,12 @@ static void kgsl_free_secure_system_pages(struct kgsl_memdesc *memdesc)
 {
 	int i;
 	struct scatterlist *sg;
-	int ret = unlock_sgt(memdesc->sgt);
+	int ret;
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
+	ret = kgsl_unlock_sgt(memdesc->sgt);
 	if (ret) {
 		/*
 		 * Unlock of the secure buffer failed. This buffer will
@@ -1290,8 +1317,12 @@ static void kgsl_free_secure_system_pages(struct kgsl_memdesc *memdesc)
 
 static void kgsl_free_secure_pages(struct kgsl_memdesc *memdesc)
 {
-	int ret = unlock_sgt(memdesc->sgt);
+	int ret;
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
+	ret = kgsl_unlock_sgt(memdesc->sgt);
 	if (ret) {
 		/*
 		 * Unlock of the secure buffer failed. This buffer will
@@ -1320,6 +1351,9 @@ static void kgsl_free_pages(struct kgsl_memdesc *memdesc)
 	kgsl_paged_unmap_kernel(memdesc);
 	WARN_ON(memdesc->hostptr);
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
 
 	_kgsl_free_pages(memdesc, memdesc->page_count);
@@ -1338,6 +1372,9 @@ static void kgsl_free_system_pages(struct kgsl_memdesc *memdesc)
 	kgsl_paged_unmap_kernel(memdesc);
 	WARN_ON(memdesc->hostptr);
 
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
 	atomic_long_sub(memdesc->size, &kgsl_driver.stats.page_alloc);
 
 	for (i = 0; i < memdesc->page_count; i++)
@@ -1351,9 +1388,6 @@ static void kgsl_free_system_pages(struct kgsl_memdesc *memdesc)
 void kgsl_unmap_and_put_gpuaddr(struct kgsl_memdesc *memdesc)
 {
 	if (!memdesc->size || !memdesc->gpuaddr)
-		return;
-
-	if (WARN_ON(kgsl_memdesc_is_global(memdesc)))
 		return;
 
 	/*
@@ -1382,6 +1416,7 @@ static const struct kgsl_memdesc_ops kgsl_contiguous_ops = {
 static const struct kgsl_memdesc_ops kgsl_secure_system_ops = {
 	.free = kgsl_free_secure_system_pages,
 	/* FIXME: Make sure vmflags / vmfault does the right thing here */
+	.put_gpuaddr = kgsl_unmap_and_put_gpuaddr,
 };
 
 static const struct kgsl_memdesc_ops kgsl_secure_page_ops = {
@@ -1493,7 +1528,7 @@ static int kgsl_alloc_secure_pages(struct kgsl_device *device,
 	/* Now that we've moved to a sg table don't need the pages anymore */
 	kvfree(pages);
 
-	ret = lock_sgt(sgt, size);
+	ret = kgsl_lock_sgt(sgt, size);
 	if (ret) {
 		if (ret != -EADDRNOTAVAIL)
 			kgsl_free_pages_from_sgt(memdesc);

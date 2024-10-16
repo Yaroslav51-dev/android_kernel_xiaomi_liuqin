@@ -12,13 +12,8 @@
 #include <linux/arm-smccc.h>
 #include <linux/dma-mapping.h>
 #include <linux/qtee_shmbridge.h>
-#include <linux/wait.h>
 
 #include "qcom_scm.h"
-
-//Mi-Security Add
-DECLARE_WAIT_QUEUE_HEAD(tzdbg_log_wq);
-EXPORT_SYMBOL(tzdbg_log_wq);
 
 /**
  * struct arm_smccc_args
@@ -122,6 +117,7 @@ static int scm_smc_do_quirk(struct device *dev, struct arm_smccc_args *smc,
 {
 	struct completion *wq = NULL;
 	struct qcom_scm *qscm;
+	struct arm_smccc_args original = *smc;
 	u32 wq_ctx, smc_call_ctx, flags;
 
 	do {
@@ -153,7 +149,8 @@ static int scm_smc_do_quirk(struct device *dev, struct arm_smccc_args *smc,
 				continue;
 			}
 		} else if ((long)res->a0 < 0) {
-			/* Error, simply return to caller */
+			/* Error, return to caller with original SMC call */
+			*smc = original;
 			break;
 		} else {
 			/*
@@ -291,7 +288,6 @@ int __scm_smc_call(struct device *dev, const struct qcom_scm_desc *desc,
 	}
 
 	ret = (long)smc_res.a0 ? qcom_scm_remap_error(smc_res.a0) : 0;
-	wake_up_interruptible(&tzdbg_log_wq);
 
 	return ret;
 }

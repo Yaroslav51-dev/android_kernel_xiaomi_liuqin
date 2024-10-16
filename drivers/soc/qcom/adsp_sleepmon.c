@@ -38,8 +38,6 @@
 #include <linux/jiffies.h>
 #include <linux/suspend.h>
 #include <uapi/misc/adsp_sleepmon.h>
-#include <linux/remoteproc.h>
-#include <linux/remoteproc/qcom_rproc.h>
 
 #define ADSPSLEEPMON_SMEM_ADSP_PID						2
 #define ADSPSLEEPMON_SLEEPSTATS_ADSP_SMEM_ID			606
@@ -134,7 +132,6 @@ struct adspsleepmon {
 	struct dentry *debugfs_panic_file;
 	struct dentry *debugfs_master_stats;
 	struct dentry *debugfs_read_panic_state;
-	struct rproc *adsp_rproc;
 };
 
 static struct adspsleepmon g_adspsleepmon;
@@ -362,33 +359,36 @@ static int adspsleepmon_smem_init(void)
 	g_adspsleepmon.lpm_stats = qcom_smem_get(
 						ADSPSLEEPMON_SMEM_ADSP_PID,
 						ADSPSLEEPMON_SLEEPSTATS_ADSP_SMEM_ID,
-						NULL);
+						&size);
 
-	if (IS_ERR_OR_NULL(g_adspsleepmon.lpm_stats)) {
-		pr_err("Failed to get sleep stats from SMEM for ADSP: %d\n",
-				PTR_ERR(g_adspsleepmon.lpm_stats));
+	if (IS_ERR_OR_NULL(g_adspsleepmon.lpm_stats) ||
+		(sizeof(struct sleep_stats) > size)) {
+		pr_err("Failed to get sleep stats from SMEM for ADSP: %d, size: %d\n",
+				PTR_ERR(g_adspsleepmon.lpm_stats), size);
 		return -ENOMEM;
 	}
 
 	g_adspsleepmon.lpi_stats = qcom_smem_get(
 						ADSPSLEEPMON_SMEM_ADSP_PID,
 						ADSPSLEEPMON_SLEEPSTATS_ADSP_LPI_SMEM_ID,
-						NULL);
+						&size);
 
-	if (IS_ERR_OR_NULL(g_adspsleepmon.lpi_stats)) {
-		pr_err("Failed to get LPI sleep stats from SMEM for ADSP: %d\n",
-				PTR_ERR(g_adspsleepmon.lpi_stats));
+	if (IS_ERR_OR_NULL(g_adspsleepmon.lpi_stats) ||
+		(sizeof(struct sleep_stats) > size)) {
+		pr_err("Failed to get LPI sleep stats from SMEM for ADSP: %d, size: %d\n",
+				PTR_ERR(g_adspsleepmon.lpi_stats), size);
 		return -ENOMEM;
 	}
 
 	g_adspsleepmon.dsppm_stats = qcom_smem_get(
 						   ADSPSLEEPMON_SMEM_ADSP_PID,
 						ADSPSLEEPMON_DSPPMSTATS_SMEM_ID,
-						NULL);
+						&size);
 
-	if (IS_ERR_OR_NULL(g_adspsleepmon.dsppm_stats)) {
-		pr_err("Failed to get DSPPM stats from SMEM for ADSP: %d\n",
-				PTR_ERR(g_adspsleepmon.dsppm_stats));
+	if (IS_ERR_OR_NULL(g_adspsleepmon.dsppm_stats) ||
+		(sizeof(struct dsppm_stats) > size)) {
+		pr_err("Failed to get DSPPM stats from SMEM for ADSP: %d, size: %d\n",
+				PTR_ERR(g_adspsleepmon.dsppm_stats), size);
 		return -ENOMEM;
 	}
 
@@ -432,8 +432,6 @@ static int adspsleepmon_driver_probe(struct platform_device *pdev)
 {
 	int result = 0;
 	struct device *dev = &pdev->dev;
-	phandle rproc_phandle;
-	struct rproc *adsp;
 
 	g_adspsleepmon.b_config_panic_lpm = of_property_read_bool(dev->of_node,
 			"qcom,enable_panic_lpm");
@@ -446,22 +444,6 @@ static int adspsleepmon_driver_probe(struct platform_device *pdev)
 
 	of_property_read_u32(dev->of_node, "qcom,wait_time_lpi",
 						 &g_adspsleepmon.lpi_wait_time);
-
-	if (of_property_read_u32(dev->of_node, "qcom,rproc-handle",
-                         &rproc_phandle)) {
-		dev_info(dev, "Missing remotproc handle, will cause kernel panic instead of adsp ssr\n");
-		g_adspsleepmon.adsp_rproc = NULL;
-	} else {
-		adsp = rproc_get_by_phandle(rproc_phandle);
-		if (!adsp) {
-			dev_err(dev, "%s: fail to get rproc\n", __func__);
-			return -EPROBE_DEFER;
-		} else {
-			dev_err(dev, "%s: success to get rproc, adsp_sleepmon\n", __func__);
-		}
-
-		g_adspsleepmon.adsp_rproc = adsp;
-	}
 
 	g_adspsleepmon.b_panic_lpm = g_adspsleepmon.b_config_panic_lpm;
 	g_adspsleepmon.b_panic_lpi = g_adspsleepmon.b_config_panic_lpi;
@@ -491,7 +473,7 @@ static int adspsleepmon_driver_probe(struct platform_device *pdev)
 static int current_audio_pid(struct dsppm_stats *curr_dsppm_stats)
 {
 	int i;
-	int curr_pid_audio, audio_pid_active = 0;
+	int curr_pid_audio = 0, audio_pid_active = 0;
 
 	for (i = 0; i < ADSPSLEEPMON_DSPPMSTATS_NUMPD; i++) {
 
@@ -559,19 +541,20 @@ static int adspsleepmon_worker(void *data)
 
 			curr_timestamp = __arch_counter_get_cntvct();
 
+			if (curr_timestamp >= g_adspsleepmon.backup_lpm_timestamp)
+				elapsed_time = (curr_timestamp -
+					 g_adspsleepmon.backup_lpm_timestamp);
+			else
+				elapsed_time = U64_MAX -
+					g_adspsleepmon.backup_lpm_timestamp +
+					curr_timestamp;
+
 			if (!g_adspsleepmon.timer_event && g_adspsleepmon.suspend_event) {
 				/*
 				 * Check if we have elapsed enough duration
 				 * to make a decision if it is not timer
 				 * event
 				 */
-				if (curr_timestamp >= g_adspsleepmon.backup_lpm_timestamp)
-					elapsed_time = (curr_timestamp -
-						 g_adspsleepmon.backup_lpm_timestamp);
-				else
-					elapsed_time = U64_MAX -
-						g_adspsleepmon.backup_lpm_timestamp +
-						curr_timestamp;
 
 				if (elapsed_time <
 					(g_adspsleepmon.lpm_wait_time *
@@ -636,35 +619,18 @@ static int adspsleepmon_worker(void *data)
 					if (g_adspsleepmon.b_panic_lpm &&
 						audio_pid_active &&
 						(curr_lpm_stats.accumulated ==
-						g_adspsleepmon.backup_lpm_stats.accumulated)) {
-						if (g_adspsleepmon.adsp_rproc) {
-							pr_err("Shutting Down ADSP\n");
-							rproc_shutdown(g_adspsleepmon.adsp_rproc);
-							pr_err("ADSP Shutdown Completed, Calling Boot\n");
-							rproc_boot(g_adspsleepmon.adsp_rproc);
-							g_adspsleepmon.audio_stats.num_sessions = 0;
-							g_adspsleepmon.audio_stats.num_lpi_sessions = 0;
-							del_timer(&adspsleep_timer);
-							g_adspsleepmon.timer_pending = false;
-							memcpy(&g_adspsleepmon.backup_lpm_stats,
-							g_adspsleepmon.lpm_stats,
-							sizeof(struct sleep_stats));
-							g_adspsleepmon.backup_lpm_timestamp = __arch_counter_get_cntvct();
-							pr_err("ADSP Boot Completed\n");
-						} else {
-							panic("ADSP sleep issue detected");
-						}
-					}
+						g_adspsleepmon.backup_lpm_stats.accumulated))
+						panic("ADSP sleep issue detected");
+
 				}
 			}
 
-			if (g_adspsleepmon.timer_event) {
-				memcpy(&g_adspsleepmon.backup_lpm_stats,
-				g_adspsleepmon.lpm_stats,
-				sizeof(struct sleep_stats));
+			memcpy(&g_adspsleepmon.backup_lpm_stats,
+			&curr_lpm_stats,
+			sizeof(struct sleep_stats));
 
-				g_adspsleepmon.backup_lpm_timestamp = __arch_counter_get_cntvct();
-			}
+			g_adspsleepmon.backup_lpm_timestamp = __arch_counter_get_cntvct();
+
 		} else if (g_adspsleepmon.audio_stats.num_sessions ==
 					g_adspsleepmon.audio_stats.num_lpi_sessions) {
 
@@ -737,31 +703,18 @@ static int adspsleepmon_worker(void *data)
 					curr_pid_audio = current_audio_pid(&curr_dsppm_stats);
 					audio_pid_active = curr_pid_audio;
 
-					if (g_adspsleepmon.b_panic_lpi && audio_pid_active) {
-						if (g_adspsleepmon.adsp_rproc) {
-							pr_err("Shutting Down ADSP\n");
-							rproc_shutdown(g_adspsleepmon.adsp_rproc);
-							pr_err("ADSP Shutdown Completed, Calling Boot\n");
-							rproc_boot(g_adspsleepmon.adsp_rproc);
-							g_adspsleepmon.audio_stats.num_sessions = 0;
-							g_adspsleepmon.audio_stats.num_lpi_sessions = 0;
-							del_timer(&adspsleep_timer);
-							g_adspsleepmon.timer_pending = false;
-							pr_err("ADSP Boot Completed\n");
-						} else {
-							panic("ADSP LPI issue detected");
-						}
-					}
+					if (g_adspsleepmon.b_panic_lpi && audio_pid_active)
+						panic("ADSP LPI issue detected");
+
 				}
 			}
 
-			if (g_adspsleepmon.timer_event) {
-				memcpy(&g_adspsleepmon.backup_lpi_stats,
-				&curr_lpi_stats,
-				sizeof(struct sleep_stats));
+			memcpy(&g_adspsleepmon.backup_lpi_stats,
+			&curr_lpi_stats,
+			sizeof(struct sleep_stats));
 
-				g_adspsleepmon.backup_lpi_timestamp = __arch_counter_get_cntvct();
-			}
+			g_adspsleepmon.backup_lpi_timestamp = __arch_counter_get_cntvct();
+
 		}
 
 		if (g_adspsleepmon.timer_event) {
@@ -848,12 +801,7 @@ static int adspsleepmon_device_release(struct inode *inode, struct file *fp)
 		 *   Stop -> An active session
 		 */
 		if (num_sessions != g_adspsleepmon.audio_stats.num_sessions) {
-			if (num_sessions &&
-				!g_adspsleepmon.audio_stats.num_sessions &&
-				(num_sessions != num_lpi_sessions)) {
-				del_timer(&adspsleep_timer);
-				g_adspsleepmon.timer_pending = false;
-			} else if (!num_sessions ||
+			if (!num_sessions ||
 					(num_sessions == num_lpi_sessions)) {
 
 				if (!num_sessions) {
@@ -874,6 +822,9 @@ static int adspsleepmon_device_release(struct inode *inode, struct file *fp)
 
 				mod_timer(&adspsleep_timer, jiffies + delay * HZ);
 				g_adspsleepmon.timer_pending = true;
+			} else if (g_adspsleepmon.timer_pending) {
+				del_timer(&adspsleep_timer);
+				g_adspsleepmon.timer_pending = false;
 			}
 
 			g_adspsleepmon.audio_stats.num_sessions = num_sessions;
@@ -1059,12 +1010,7 @@ static long adspsleepmon_device_ioctl(struct file *file,
 		 *				   active session)
 		 *   Stop -> An active session
 		 */
-		if (num_sessions &&
-			!g_adspsleepmon.audio_stats.num_sessions &&
-			(num_sessions != num_lpi_sessions)) {
-			del_timer(&adspsleep_timer);
-			g_adspsleepmon.timer_pending = false;
-		} else if (!num_sessions ||
+		if (!num_sessions ||
 				(num_sessions == num_lpi_sessions)) {
 
 			if (!num_sessions) {
@@ -1085,6 +1031,9 @@ static long adspsleepmon_device_ioctl(struct file *file,
 
 			mod_timer(&adspsleep_timer, jiffies + delay * HZ);
 			g_adspsleepmon.timer_pending = true;
+		} else if (g_adspsleepmon.timer_pending) {
+			del_timer(&adspsleep_timer);
+			g_adspsleepmon.timer_pending = false;
 		}
 
 		g_adspsleepmon.audio_stats.num_sessions = num_sessions;

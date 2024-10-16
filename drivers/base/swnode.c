@@ -532,7 +532,7 @@ software_node_get_reference_args(const struct fwnode_handle *fwnode,
 		return -ENOENT;
 
 	if (nargs_prop) {
-		error = property_entry_read_int_array(swnode->node->properties,
+		error = property_entry_read_int_array(ref->node->properties,
 						      nargs_prop, sizeof(u32),
 						      &nargs_prop_val, 1);
 		if (error)
@@ -543,6 +543,9 @@ software_node_get_reference_args(const struct fwnode_handle *fwnode,
 
 	if (nargs > NR_FWNODE_REFERENCE_ARGS)
 		return -EINVAL;
+
+	if (!args)
+		return 0;
 
 	args->fwnode = software_node_get(refnode);
 	args->nargs = nargs;

@@ -586,4 +586,3 @@ config VIDEO_RCAR_DRIF
 endif # SDR_PLATFORM_DRIVERS
 
 source "drivers/media/platform/msm/Kconfig"
-source "drivers/media/platform/xiaomi/Kconfig"
