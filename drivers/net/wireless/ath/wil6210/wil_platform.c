@@ -5,16 +5,14 @@
 
 #include <linux/device.h>
 #include "wil_platform.h"
-#include "msm_11ad.h"
 
 int __init wil_platform_modinit(void)
 {
-	return msm_11ad_modinit();
+	return 0;
 }
 
 void wil_platform_modexit(void)
 {
-	msm_11ad_modexit();
 }
 
 /* wil_platform_init() - wil6210 platform module init
@@ -26,7 +24,7 @@ void wil_platform_modexit(void)
 void *wil_platform_init(struct device *dev, struct wil_platform_ops *ops,
 			const struct wil_platform_rops *rops, void *wil_handle)
 {
-	void *handle;
+	void *handle = ops; /* to return some non-NULL for 'void' impl. */
 
 	if (!ops) {
 		dev_err(dev,
@@ -34,7 +32,7 @@ void *wil_platform_init(struct device *dev, struct wil_platform_ops *ops,
 		return NULL;
 	}
 
-	handle = msm_11ad_dev_init(dev, ops, rops, wil_handle);
+	/* platform specific init functions should be called here */
 
 	return handle;
 }
