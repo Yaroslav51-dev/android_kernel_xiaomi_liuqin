@@ -18,7 +18,6 @@
 
 struct kprobe_data {
 	struct dwc3 *dwc;
-	struct usb_ep *ep;
 	int xi0;
 };
 
@@ -247,52 +246,6 @@ static int entry_trace_dwc3_event(struct kretprobe_instance *ri,
 	return 0;
 }
 #endif
-
-static int entry_dwc3_gadget_init_in_endpoint(struct kretprobe_instance *ri,
-				struct pt_regs *regs)
-{
-	struct dwc3_ep *dep = (struct dwc3_ep *)regs->regs[0];
-	struct dwc3 *dwc = dep->dwc;
-	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-
-	data->dwc = dwc;
-	data->xi0 = dep->number;
-
-	return 0;
-}
-
-static int exit_dwc3_gadget_init_in_endpoint(struct kretprobe_instance *ri,
-				struct pt_regs *regs)
-{
-	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-
-	usb_ep_set_maxpacket_limit(&data->dwc->eps[data->xi0]->endpoint, 1024);
-
-	return 0;
-}
-
-static int entry_dwc3_gadget_init_out_endpoint(struct kretprobe_instance *ri,
-				struct pt_regs *regs)
-{
-	struct dwc3_ep *dep = (struct dwc3_ep *)regs->regs[0];
-	struct dwc3 *dwc = dep->dwc;
-	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-
-	data->dwc = dwc;
-	data->xi0 = dep->number;
-
-	return 0;
-}
-
-static int exit_dwc3_gadget_init_out_endpoint(struct kretprobe_instance *ri,
-				struct pt_regs *regs)
-{
-	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-
-	usb_ep_set_maxpacket_limit(&data->dwc->eps[data->xi0]->endpoint, 1024);
-
-	return 0;
-}
 
 #define ENTRY_EXIT(name) {\
 	.handler = exit_##name,\
