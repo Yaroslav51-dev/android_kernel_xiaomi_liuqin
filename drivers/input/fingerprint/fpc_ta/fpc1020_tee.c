@@ -1077,7 +1077,7 @@ static void fpc_register_panel_notifier_work(struct work_struct *work)
 		pr_info("success to get active panel, retry times = %d",retry_count);
 		if (!cookie) {
 			cookie = panel_event_notifier_register(PANEL_EVENT_NOTIFICATION_PRIMARY,
-					PANEL_EVENT_NOTIFIER_CLIENT_FINGERPRINT, active_panel,
+					PANEL_EVENT_NOTIFIER_CLIENT_ECM, active_panel,
 					fpc_screen_state_for_fingerprint_callback, (void*)fpc1020);
 			if (IS_ERR(cookie))
 				pr_err("%s:Failed to register for active_panel events\n", __func__);
