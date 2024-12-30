@@ -1,4 +1,4 @@
-config TOUCHSCREEN_XIAOMI_TOUCH
+config TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	tristate "Xiaomi Touch Feature"
 	depends on INPUT_TOUCHSCREEN
 	help
