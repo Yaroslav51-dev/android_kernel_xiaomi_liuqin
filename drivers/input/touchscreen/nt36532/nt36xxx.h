@@ -121,9 +121,6 @@ extern const uint16_t gesture_key_array[];
 #define POINT_DATA_CHECKSUM 1
 #define POINT_DATA_CHECKSUM_LEN 65
 
-//---ESD Protect.---
-#define NVT_TOUCH_ESD_PROTECT 0
-#define NVT_TOUCH_ESD_CHECK_PERIOD 1500	/* ms */
 #define NVT_TOUCH_WDT_RECOVERY 1
 
 #define CHECK_PEN_DATA_CHECKSUM 0
@@ -312,8 +309,5 @@ int32_t nvt_set_page(uint32_t addr);
 int32_t nvt_wait_auto_copy(void);
 int32_t nvt_write_addr(uint32_t addr, uint8_t data);
 bool nvt_get_dbgfw_status(void);
-#if NVT_TOUCH_ESD_PROTECT
-extern void nvt_esd_check_enable(uint8_t enable);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 int switch_pen_input_device(void);
 #endif /* _LINUX_NVT_TOUCH_H */

@@ -39,22 +39,9 @@
 #include <linux/earlysuspend.h>
 #endif
 
-#if NVT_TOUCH_ESD_PROTECT
-#include <linux/jiffies.h>
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
-#if NVT_TOUCH_ESD_PROTECT
-static struct delayed_work nvt_esd_check_work;
-static struct workqueue_struct *nvt_esd_check_wq;
-static unsigned long irq_timer = 0;
-uint8_t esd_check = false;
-uint8_t esd_retry = 0;
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-extern int pen_charge_state_notifier_register_client(struct notifier_block *nb);
-extern int pen_charge_state_notifier_unregister_client(struct notifier_block *nb);
-#endif /* NVT_PEN_CONNECT_STRATEGY */
+#if WAKEUP_GESTURE && defined(CONFIG_TOUCHSCREEN_COMMON)
+#include <linux/input/tp_common.h>
+#endif
 
 #if NVT_TOUCH_EXT_PROC
 extern int32_t nvt_extra_proc_init(void);
@@ -861,15 +848,6 @@ static ssize_t nvt_flash_read(struct file *file, char __user *buff, size_t count
 		goto out;
 	}
 
-#if NVT_TOUCH_ESD_PROTECT
-	/*
-	 * stop esd check work to avoid case that 0x77 report righ after here to enable esd check again
-	 * finally lead to trigger esd recovery bootloader reset
-	 */
-	cancel_delayed_work_sync(&nvt_esd_check_work);
-	nvt_esd_check_enable(false);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
 	spi_wr = str[0] >> 7;
 	memcpy(buf, str+2, ((str[0] & 0x7F) << 8) | str[1]);
 
@@ -1562,47 +1540,6 @@ static uint8_t nvt_fw_recovery(uint8_t *point_data)
 	return detected;
 }
 
-#if NVT_TOUCH_ESD_PROTECT
-void nvt_esd_check_enable(uint8_t enable)
-{
-	/* update interrupt timer */
-	irq_timer = jiffies;
-	/* clear esd_retry counter, if protect function is enabled */
-	esd_retry = enable ? 0 : esd_retry;
-	/* enable/disable esd check flag */
-	esd_check = enable;
-}
-
-static void nvt_esd_check_func(struct work_struct *work)
-{
-	unsigned int timer = jiffies_to_msecs(jiffies - irq_timer);
-
-	//NVT_LOG("esd_check = %d (retry %d)\n", esd_check, esd_retry);	//DEBUG
-
-	if ((timer > NVT_TOUCH_ESD_CHECK_PERIOD) && esd_check) {
-		mutex_lock(&ts->lock);
-		NVT_ERR("do ESD recovery, timer = %d, retry = %d\n", timer, esd_retry);
-		/* do esd recovery, reload fw */
-		if (nvt_get_dbgfw_status()) {
-			if (nvt_update_firmware(DEFAULT_DEBUG_FW_NAME) < 0) {
-				NVT_ERR("use built-in fw");
-				nvt_update_firmware(ts->fw_name);
-			}
-		} else {
-			nvt_update_firmware(ts->fw_name);
-		}
-		mutex_unlock(&ts->lock);
-		/* update interrupt timer */
-		irq_timer = jiffies;
-		/* update esd_retry counter */
-		esd_retry++;
-	}
-
-	queue_delayed_work(nvt_esd_check_wq, &nvt_esd_check_work,
-			msecs_to_jiffies(NVT_TOUCH_ESD_CHECK_PERIOD));
-}
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
 #define PEN_DATA_LEN 14
 #if CHECK_PEN_DATA_CHECKSUM
 static int32_t nvt_ts_pen_data_checksum(uint8_t *buf, uint8_t length)
@@ -1829,9 +1766,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 	/* ESD protect by FW handshake */
 	if (nvt_fw_recovery(point_data)) {
-#if NVT_TOUCH_ESD_PROTECT
-		nvt_esd_check_enable(true);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 		goto XFER_ERROR;
 	}
 
@@ -1867,10 +1801,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 			continue;
 
 		if (((point_data[position] & 0x07) == 0x01) || ((point_data[position] & 0x07) == 0x02)) {	//finger down (enter & moving)
-#if NVT_TOUCH_ESD_PROTECT
-			/* update interrupt timer */
-			irq_timer = jiffies;
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 #if NVT_SUPER_RESOLUTION_N
 			input_x = (uint32_t)(point_data[position + 1] << 8) + (uint32_t) (point_data[position + 2]);
 			input_y = (uint32_t)(point_data[position + 3] << 8) + (uint32_t) (point_data[position + 4]);
@@ -1952,10 +1882,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 #if TOUCH_KEY_NUM > 0
 	if (point_data[61] == 0xF8) {
-#if NVT_TOUCH_ESD_PROTECT
-		/* update interrupt timer */
-		irq_timer = jiffies;
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 		for (i = 0; i < ts->max_button_num; i++) {
 			input_report_key(ts->input_dev, touch_key_array[i], ((point_data[62] >> i) & 0x01));
 		}
@@ -2330,10 +2256,6 @@ static int nvt_touchfeature_set(uint8_t *touchfeature)
 	if (mutex_lock_interruptible(&ts->lock)) {
 		return -ERESTARTSYS;
 	}
-
-#if NVT_TOUCH_ESD_PROTECT
-	nvt_esd_check_enable(false);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	ret = nvt_touchfeature_cmd_xsfer(touchfeature);
 	if (ret < 0)
@@ -2829,11 +2751,6 @@ static ssize_t tpdbg_write(struct file *file, const char __user *buf,
 		goto out;
 	}
 
-#if NVT_TOUCH_ESD_PROTECT
-	cancel_delayed_work_sync(&nvt_esd_check_work);
-	nvt_esd_check_enable(false);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
 	cmd[size] = '\0';
 
 	if (!strncmp(cmd, "irq-disable", 11))
@@ -3265,19 +3182,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	queue_delayed_work(nvt_fwu_wq, &ts->nvt_fwu_work, msecs_to_jiffies(14000));
 #endif
 
-	NVT_LOG("NVT_TOUCH_ESD_PROTECT is %d\n", NVT_TOUCH_ESD_PROTECT);
-#if NVT_TOUCH_ESD_PROTECT
-	INIT_DELAYED_WORK(&nvt_esd_check_work, nvt_esd_check_func);
-	nvt_esd_check_wq = alloc_workqueue("nvt_esd_check_wq", WQ_MEM_RECLAIM, 1);
-	if (!nvt_esd_check_wq) {
-		NVT_ERR("nvt_esd_check_wq create workqueue failed\n");
-		ret = -ENOMEM;
-		goto err_create_nvt_esd_check_wq_failed;
-	}
-	queue_delayed_work(nvt_esd_check_wq, &nvt_esd_check_work,
-			msecs_to_jiffies(NVT_TOUCH_ESD_CHECK_PERIOD));
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
-
 	//---set device node---
 #if NVT_TOUCH_PROC
 	ret = nvt_flash_proc_init();
@@ -3446,14 +3350,6 @@ err_extra_proc_init_failed:
 	nvt_flash_proc_deinit();
 err_flash_proc_init_failed:
 #endif
-#if NVT_TOUCH_ESD_PROTECT
-	if (nvt_esd_check_wq) {
-		cancel_delayed_work_sync(&nvt_esd_check_work);
-		destroy_workqueue(nvt_esd_check_wq);
-		nvt_esd_check_wq = NULL;
-	}
-err_create_nvt_esd_check_wq_failed:
-#endif
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
 		cancel_delayed_work_sync(&ts->nvt_fwu_work);
@@ -3575,15 +3471,6 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	if (ts->set_touchfeature_wq)
 		destroy_workqueue(ts->set_touchfeature_wq);
 
-#if NVT_TOUCH_ESD_PROTECT
-	if (nvt_esd_check_wq) {
-		cancel_delayed_work_sync(&nvt_esd_check_work);
-		nvt_esd_check_enable(false);
-		destroy_workqueue(nvt_esd_check_wq);
-		nvt_esd_check_wq = NULL;
-	}
-#endif
-
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
 		cancel_delayed_work_sync(&ts->nvt_fwu_work);
@@ -3687,16 +3574,7 @@ static void nvt_ts_shutdown(struct spi_device *client)
 
 	if (ts->set_touchfeature_wq)
 		destroy_workqueue(ts->set_touchfeature_wq);
-
-
-#if NVT_TOUCH_ESD_PROTECT
-	if (nvt_esd_check_wq) {
-		cancel_delayed_work_sync(&nvt_esd_check_work);
-		nvt_esd_check_enable(false);
-		destroy_workqueue(nvt_esd_check_wq);
-		nvt_esd_check_wq = NULL;
-	}
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
+#endif
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
@@ -3892,12 +3770,6 @@ static int32_t nvt_ts_resume(struct device *dev)
 	if (!ts->db_wakeup) {
 		nvt_irq_enable(true);
 	}
-
-#if NVT_TOUCH_ESD_PROTECT
-	nvt_esd_check_enable(false);
-	queue_delayed_work(nvt_esd_check_wq, &nvt_esd_check_work,
-			msecs_to_jiffies(NVT_TOUCH_ESD_CHECK_PERIOD));
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	bTouchIsAwake = 1;
 
