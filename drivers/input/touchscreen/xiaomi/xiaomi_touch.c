@@ -722,5 +722,6 @@ static void __exit xiaomi_touch_exit(void)
 }
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Xiaomi Touchscreen Driver");
 module_init(xiaomi_touch_init);
 module_exit(xiaomi_touch_exit);
