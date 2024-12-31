@@ -721,5 +721,6 @@ static void __exit xiaomi_touch_exit(void)
 	platform_driver_unregister(&xiaomi_touch_device_driver);
 }
 
-subsys_initcall(xiaomi_touch_init);
+MODULE_LICENSE("GPL");
+module_init(xiaomi_touch_init);
 module_exit(xiaomi_touch_exit);
