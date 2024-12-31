@@ -48,9 +48,7 @@ extern int32_t nvt_mp_proc_init(void);
 extern void nvt_mp_proc_deinit(void);
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 #define TOUCH_MAJOR_MAX_VALUE 255
-#endif
 
 static int32_t nvt_ts_resume(struct device *dev);
 struct nvt_ts_data *ts;
@@ -1269,7 +1267,6 @@ static int32_t nvt_parse_dt(struct device *dev)
 		NVT_LOG("config-array-size: %u\n", ts->config_array_size);
 	}
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	ret = of_property_read_u32_array(np, "novatek,touch-game-param-config1", ts->gamemode_config[0], 5);
 	if (ret) {
 		NVT_LOG("Failed to get touch-game-param-config1\n");
@@ -1305,7 +1302,6 @@ static int32_t nvt_parse_dt(struct device *dev)
 		ts->gamemode_config[2][2], ts->gamemode_config[2][3],
 		ts->gamemode_config[2][4]);
 	}
-#endif	/* #if CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE */
 
 	ts->config_array = devm_kzalloc(dev, ts->config_array_size * sizeof(struct nvt_config_info), GFP_KERNEL);
 	if (!ts->config_array) {
@@ -1815,12 +1811,10 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 			input_report_abs(ts->input_dev, ABS_MT_POSITION_X, input_x);
 			input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, input_y);
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 			if (TOUCH_MAJOR_MAX_VALUE == input_w) {
 				input_w = TOUCH_MAJOR_MAX_VALUE + 1;
 				NVT_LOG("palm event detected");
 			}
-#endif //CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, input_w);
 			input_report_abs(ts->input_dev, ABS_MT_PRESSURE, input_p);
 
@@ -2081,7 +2075,6 @@ static int32_t nvt_ts_check_chip_ver_trim_loop(void) {
 	return ret;
 }
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 static struct xiaomi_touch_interface xiaomi_touch_interfaces;
 
 static void nvt_init_touchmode_data(void)
@@ -2327,7 +2320,6 @@ static int nvt_set_cur_value(int nvt_mode, int nvt_value)
 		nvt_set_gesture_mode();
 		return 0;
 	} else if (nvt_mode == Touch_Pen_ENABLE && ts && nvt_value >= 0) {
-#endif
 
 		switch_pen_input_device();
 		release_pen_event();
@@ -2839,11 +2831,9 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	input_set_abs_params(ts->input_dev, ABS_MT_PRESSURE, 0, TOUCH_FORCE_NUM, 0, 0);    //pressure = TOUCH_FORCE_NUM
 
 #if TOUCH_MAX_FINGER_NUM > 1
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, TOUCH_MAJOR_MAX_VALUE, 0, 0);
 #else
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);    //area = 255
-#endif //CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 
 #if NVT_SUPER_RESOLUTION_N
 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0, ts->abs_x_max * NVT_SUPER_RESOLUTION_N - 1, 0, 0);
@@ -3022,7 +3012,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	INIT_WORK(&ts->resume_work, nvt_resume_work);
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	ts->set_touchfeature_wq = create_singlethread_workqueue("nvt-set-touchfeature-queue");
 	if (!ts->set_touchfeature_wq) {
 		NVT_ERR("create set touch feature workqueue fail");
@@ -3030,7 +3019,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		goto err_create_set_touchfeature_work_queue;
 	}
 	INIT_WORK(&ts->set_touchfeature_work, update_touchfeature_value_work);
-#endif
 
 #if defined(_MSM_DRM_NOTIFY_H_)
 	ts->drm_notif.notifier_call = nvt_drm_notifier_callback;
@@ -3057,7 +3045,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	xiaomi_touch_interfaces.touch_vendor_read = nvt_touch_vendor_read;
 	xiaomi_touch_interfaces.panel_display_read = nvt_panel_display_read;
 	xiaomi_touch_interfaces.panel_vendor_read = nvt_panel_vendor_read;
@@ -3067,7 +3054,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	xiaomi_touch_interfaces.resetMode = nvt_reset_mode;
 	xiaomi_touch_interfaces.getModeAll = nvt_get_mode_all;
 	nvt_init_touchmode_data();
-#endif
 
 #ifdef CONFIG_TOUCHSCREEN_NVT_DEBUG_FS
 	ts->debugfs = debugfs_create_dir("tp_debug", NULL);
@@ -3094,10 +3080,8 @@ err_register_early_suspend_failed:
 #endif
 	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->set_touchfeature_wq);
-#if CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 err_create_set_touchfeature_work_queue:
 	destroy_workqueue(ts->event_wq);
-#endif
 err_alloc_work_thread_failed:
 
 #if NVT_TOUCH_MP
@@ -3259,10 +3243,8 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 
 	spi_set_drvdata(client, NULL);
 
-#if CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	if (ts->set_touchfeature_wq)
 		destroy_workqueue(ts->set_touchfeature_wq);
-#endif
 
 	if (ts->xbuf) {
 		kfree(ts->xbuf);
@@ -3308,10 +3290,8 @@ static void nvt_ts_shutdown(struct spi_device *client)
 	destroy_workqueue(ts->event_wq);
 	ts->event_wq = NULL;
 
-#if CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	if (ts->set_touchfeature_wq)
 		destroy_workqueue(ts->set_touchfeature_wq);
-#endif
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
@@ -3416,10 +3396,8 @@ static int32_t nvt_ts_resume(struct device *dev)
 		NVT_LOG("execute delayed command, set double click wakeup %d\n", ts->db_wakeup);
 	}
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	NVT_LOG("reload the game mode cmd");
 	nvt_game_mode_recovery();
-#endif
 
 	switch_pen_input_device();
 

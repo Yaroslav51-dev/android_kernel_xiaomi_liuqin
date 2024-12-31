@@ -30,9 +30,7 @@
 #include <linux/earlysuspend.h>
 #endif
 
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 #include "../xiaomi/xiaomi_touch.h"
-#endif
 
 #include "nt36xxx_mem_map.h"
 
@@ -199,11 +197,9 @@ struct nvt_ts_data {
 	uint8_t max_touch_num;
 	uint8_t max_button_num;
 	uint32_t int_trigger_type;
-#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	u32 gamemode_config[3][5];
 	struct workqueue_struct *set_touchfeature_wq;
 	struct work_struct set_touchfeature_work;
-#endif
 	int32_t irq_gpio;
 	uint32_t irq_flags;
 	int32_t reset_gpio;
