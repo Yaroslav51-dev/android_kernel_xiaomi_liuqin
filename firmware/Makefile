@@ -1,2 +1,0 @@
-fw-shipped-$(CONFIG_TOUCHSCREEN_NT36xxx_HOSTDL_SPI) += novatek_nt36675_j3s_fw01.bin novatek_nt36675_j3s_mp01.bin novatek_ts_fw.bin novatek_ts_mp.bin
-fw-shipped-$(CONFIG_TOUCHSCREEN_NT36532_HOSTDL_SPI_FW) += novatek_nt36532_m82_fw_csot.bin novatek_nt36532_m82_mp_csot.bin novatek_nt36532_m82_fw_tm.bin novatek_nt36532_m82_mp_tm.bin novatek_nt36523_k81_fw01.bin novatek_nt36523_k81_mp01.bin novatek_nt36523_k81a_fw02.bin novatek_nt36523_k81a_mp02.bin novatek_nt36523_k81a_fw01.bin novatek_nt36523_k81a_mp01.bin
