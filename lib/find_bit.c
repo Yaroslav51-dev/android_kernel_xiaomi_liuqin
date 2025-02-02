@@ -100,38 +100,6 @@ unsigned long find_next_and_bit(const unsigned long *addr1,
 EXPORT_SYMBOL(find_next_and_bit);
 #endif
 
-/*
- * Find the first set bit in a memory region.
- */
-unsigned long find_first_bit(const unsigned long *addr, unsigned long size)
-{
-	unsigned long idx;
-
-	for (idx = 0; idx * BITS_PER_LONG < size; idx++) {
-		if (addr[idx])
-			return min(idx * BITS_PER_LONG + __ffs(addr[idx]), size);
-	}
-
-	return size;
-}
-EXPORT_SYMBOL(find_first_bit);
-
-/*
- * Find the first cleared bit in a memory region.
- */
-unsigned long find_first_zero_bit(const unsigned long *addr, unsigned long size)
-{
-	unsigned long idx;
-
-	for (idx = 0; idx * BITS_PER_LONG < size; idx++) {
-		if (addr[idx] != ~0UL)
-			return min(idx * BITS_PER_LONG + ffz(addr[idx]), size);
-	}
-
-	return size;
-}
-EXPORT_SYMBOL(find_first_zero_bit);
-
 #ifndef find_last_bit
 unsigned long find_last_bit(const unsigned long *addr, unsigned long size)
 {
