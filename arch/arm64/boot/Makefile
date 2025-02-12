@@ -14,9 +14,28 @@
 # Based on the ia64 boot/Makefile.
 #
 
+include $(srctree)/arch/arm64/boot/dts/Makefile
+
 OBJCOPYFLAGS_Image :=-O binary -R .note -R .note.gnu.build-id -R .comment -S
 
 targets := Image Image.bz2 Image.gz Image.lz4 Image.lzma Image.lzo
+
+DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES))
+ifneq ($(DTB_NAMES),)
+DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
+else
+DTB_LIST := $(dtb-y)
+endif
+DTB_OBJS := $(shell find $(obj)/dts/ -name \*.dtb)
+
+# Add RTIC DTB to the DTB list if RTIC MPGen is enabled
+# Note, we keep this for compatibility with
+# BUILD_ARM64_APPENDED_DTB_IMAGE targets.
+# The rtic_mp.dts would be generated with the vmlinux if
+# MPGen enabled (RTIC_MPGEN defined).
+ifdef RTIC_MPGEN
+DTB_OBJS += rtic_mp.dtb
+endif
 
 $(obj)/Image: vmlinux FORCE
 	$(call if_changed,objcopy)
