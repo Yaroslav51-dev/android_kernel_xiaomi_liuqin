@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2021-2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/clk-provider.h>
@@ -14,6 +14,7 @@
 
 #include "clk-alpha-pll.h"
 #include "clk-branch.h"
+#include "clk-pm.h"
 #include "clk-rcg.h"
 #include "clk-regmap-divider.h"
 #include "clk-regmap-mux.h"
@@ -989,7 +990,7 @@ static struct clk_rcg2 gcc_sdcc1_apps_clk_src = {
 		.name = "gcc_sdcc1_apps_clk_src",
 		.parent_data = gcc_parent_data_6,
 		.num_parents = ARRAY_SIZE(gcc_parent_data_6),
-		.ops = &clk_rcg2_ops,
+		.ops = &clk_rcg2_floor_ops,
 	},
 	.clkr.vdd_data = {
 		.vdd_classes = gcc_neo_regulators,
@@ -1019,7 +1020,7 @@ static struct clk_rcg2 gcc_sdcc1_ice_core_clk_src = {
 		.name = "gcc_sdcc1_ice_core_clk_src",
 		.parent_data = gcc_parent_data_7,
 		.num_parents = ARRAY_SIZE(gcc_parent_data_7),
-		.ops = &clk_rcg2_ops,
+		.ops = &clk_rcg2_floor_ops,
 	},
 	.clkr.vdd_data = {
 		.vdd_classes = gcc_neo_regulators,
@@ -1178,6 +1179,7 @@ static struct clk_branch gcc_camera_hf_axi_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data){
 			.name = "gcc_camera_hf_axi_clk",
+			.flags = CLK_DONT_HOLD_STATE,
 			.ops = &clk_branch2_aon_ops,
 		},
 	},
@@ -1191,6 +1193,7 @@ static struct clk_branch gcc_camera_sf_axi_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data){
 			.name = "gcc_camera_sf_axi_clk",
+			.flags = CLK_DONT_HOLD_STATE,
 			.ops = &clk_branch2_aon_ops,
 		},
 	},
@@ -1429,6 +1432,20 @@ static struct clk_branch gcc_iris_ss_hf_axi1_clk = {
 	},
 };
 
+static struct clk_branch gcc_iris_ss_hf_axi1_sreg = {
+	.sreg_enable_reg = 0x42034,
+	.sreg_core_ack_bit = BIT(11),
+	.sreg_periph_ack_bit = BIT(10),
+	.clkr = {
+		.enable_reg = 0x42034,
+		.enable_mask = BIT(3),
+		.hw.init = &(struct clk_init_data){
+			.name = "gcc_iris_ss_hf_axi1_sreg",
+			.ops = &clk_branch2_sreg_ops,
+		},
+	},
+};
+
 static struct clk_branch gcc_iris_ss_spd_axi1_clk = {
 	.halt_reg = 0x70020,
 	.halt_check = BRANCH_HALT_VOTED,
@@ -1445,6 +1462,20 @@ static struct clk_branch gcc_iris_ss_spd_axi1_clk = {
 			.num_parents = 1,
 			.flags = CLK_SET_RATE_PARENT,
 			.ops = &clk_branch2_ops,
+		},
+	},
+};
+
+static struct clk_branch gcc_iris_ss_spd_axi1_sreg = {
+	.sreg_enable_reg = 0x70024,
+	.sreg_core_ack_bit = BIT(11),
+	.sreg_periph_ack_bit = BIT(10),
+	.clkr = {
+		.enable_reg = 0x70024,
+		.enable_mask = BIT(3),
+		.hw.init = &(struct clk_init_data){
+			.name = "gcc_iris_ss_spd_axi1_sreg",
+			.ops = &clk_branch2_sreg_ops,
 		},
 	},
 };
@@ -1727,6 +1758,7 @@ static struct clk_branch gcc_qmip_camera_nrt_ahb_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data){
 			.name = "gcc_qmip_camera_nrt_ahb_clk",
+			.flags = CLK_DONT_HOLD_STATE,
 			.ops = &clk_branch2_aon_ops,
 		},
 	},
@@ -1740,6 +1772,7 @@ static struct clk_branch gcc_qmip_camera_rt_ahb_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(struct clk_init_data){
 			.name = "gcc_qmip_camera_rt_ahb_clk",
+			.flags = CLK_DONT_HOLD_STATE,
 			.ops = &clk_branch2_aon_ops,
 		},
 	},
@@ -2349,6 +2382,20 @@ static struct clk_branch gcc_video_axi0_clk = {
 	},
 };
 
+static struct clk_branch gcc_video_axi0_sreg = {
+	.sreg_enable_reg = 0x4201C,
+	.sreg_core_ack_bit = BIT(11),
+	.sreg_periph_ack_bit = BIT(10),
+	.clkr = {
+		.enable_reg = 0x4201C,
+		.enable_mask = BIT(3),
+		.hw.init = &(struct clk_init_data){
+			.name = "gcc_video_axi0_sreg",
+			.ops = &clk_branch2_sreg_ops,
+		},
+	},
+};
+
 static struct clk_branch gcc_video_axi1_clk = {
 	.halt_reg = 0x42024,
 	.halt_check = BRANCH_HALT_SKIP,
@@ -2360,6 +2407,20 @@ static struct clk_branch gcc_video_axi1_clk = {
 		.hw.init = &(struct clk_init_data){
 			.name = "gcc_video_axi1_clk",
 			.ops = &clk_branch2_ops,
+		},
+	},
+};
+
+static struct clk_branch gcc_video_axi1_sreg = {
+	.sreg_enable_reg = 0x42028,
+	.sreg_core_ack_bit = BIT(11),
+	.sreg_periph_ack_bit = BIT(10),
+	.clkr = {
+		.enable_reg = 0x42028,
+		.enable_mask = BIT(3),
+		.hw.init = &(struct clk_init_data){
+			.name = "gcc_video_axi1_sreg",
+			.ops = &clk_branch2_sreg_ops,
 		},
 	},
 };
@@ -2396,7 +2457,9 @@ static struct clk_regmap *gcc_neo_clocks[] = {
 	[GCC_GPU_MEMNOC_GFX_CLK] = &gcc_gpu_memnoc_gfx_clk.clkr,
 	[GCC_GPU_SNOC_DVM_GFX_CLK] = &gcc_gpu_snoc_dvm_gfx_clk.clkr,
 	[GCC_IRIS_SS_HF_AXI1_CLK] = &gcc_iris_ss_hf_axi1_clk.clkr,
+	[GCC_IRIS_SS_HF_AXI1_SREG] = &gcc_iris_ss_hf_axi1_sreg.clkr,
 	[GCC_IRIS_SS_SPD_AXI1_CLK] = &gcc_iris_ss_spd_axi1_clk.clkr,
+	[GCC_IRIS_SS_SPD_AXI1_SREG] = &gcc_iris_ss_spd_axi1_sreg.clkr,
 	[GCC_PCIE_0_AUX_CLK] = &gcc_pcie_0_aux_clk.clkr,
 	[GCC_PCIE_0_AUX_CLK_SRC] = &gcc_pcie_0_aux_clk_src.clkr,
 	[GCC_PCIE_0_CFG_AHB_CLK] = &gcc_pcie_0_cfg_ahb_clk.clkr,
@@ -2479,7 +2542,22 @@ static struct clk_regmap *gcc_neo_clocks[] = {
 	[GCC_USB3_PRIM_PHY_PIPE_CLK] = &gcc_usb3_prim_phy_pipe_clk.clkr,
 	[GCC_USB3_PRIM_PHY_PIPE_CLK_SRC] = &gcc_usb3_prim_phy_pipe_clk_src.clkr,
 	[GCC_VIDEO_AXI0_CLK] = &gcc_video_axi0_clk.clkr,
+	[GCC_VIDEO_AXI0_SREG] = &gcc_video_axi0_sreg.clkr,
 	[GCC_VIDEO_AXI1_CLK] = &gcc_video_axi1_clk.clkr,
+	[GCC_VIDEO_AXI1_SREG] = &gcc_video_axi1_sreg.clkr,
+};
+
+/*
+ * gcc_disp_ahb_clk
+ * gcc_video_ahb_clk
+ * gcc_video_xo_clk
+ * gcc_gpu_cfg_ahb_clk
+ */
+static struct critical_clk_offset critical_clk_list[] = {
+	{ .offset = 0x37004, .mask = BIT(0) },
+	{ .offset = 0x42004, .mask = BIT(0) },
+	{ .offset = 0x42048, .mask = BIT(0) },
+	{ .offset = 0x9b004, .mask = BIT(0) },
 };
 
 static const struct qcom_reset_map gcc_neo_resets[] = {
@@ -2514,6 +2592,9 @@ static const struct qcom_reset_map gcc_neo_resets[] = {
 	[GCC_VIDEO_AXI0_CLK_ARES] = { 0x42018, 2 },
 	[GCC_VIDEO_AXI1_CLK_ARES] = { 0x42024, 2 },
 	[GCC_VIDEO_BCR] = { 0x42000 },
+	[GCC_IRIS_SS_HF_AXI_CLK_ARES] = { 0x42030, 2 },
+	[GCC_IRIS_SS_SPD_AXI_CLK_ARES] = { 0x70020, 2 },
+	[GCC_DDRSS_SPAD_CLK_ARES] = { 0x70000, 2 },
 };
 
 
@@ -2540,7 +2621,7 @@ static const struct regmap_config gcc_neo_regmap_config = {
 	.fast_io = true,
 };
 
-static const struct qcom_cc_desc gcc_neo_desc = {
+static struct qcom_cc_desc gcc_neo_desc = {
 	.config = &gcc_neo_regmap_config,
 	.clks = gcc_neo_clocks,
 	.num_clks = ARRAY_SIZE(gcc_neo_clocks),
@@ -2548,6 +2629,8 @@ static const struct qcom_cc_desc gcc_neo_desc = {
 	.num_resets = ARRAY_SIZE(gcc_neo_resets),
 	.clk_regulators = gcc_neo_regulators,
 	.num_clk_regulators = ARRAY_SIZE(gcc_neo_regulators),
+	.critical_clk_en = critical_clk_list,
+	.num_critical_clk = ARRAY_SIZE(critical_clk_list),
 };
 
 static const struct of_device_id gcc_neo_match_table[] = {
@@ -2565,20 +2648,17 @@ static int gcc_neo_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	/*
-	 * Keep the clocks always-ON
-	 * GCC_DISP_AHB_CLK, GCC_VIDEO_AHB_CLK, GCC_VIDEO_XO_CLK,
-	 * GCC_GPU_CFG_AHB_CLK
-	 */
-	regmap_update_bits(regmap, 0x37004, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x42004, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x42048, BIT(0), BIT(0));
-	regmap_update_bits(regmap, 0x9b004, BIT(0), BIT(0));
+	ret = register_qcom_clks_pm(pdev, false, &gcc_neo_desc);
+	if (ret)
+		dev_err(&pdev->dev, "Failed to register for pm ops\n");
 
 	ret = qcom_cc_register_rcg_dfs(regmap, gcc_dfs_clocks,
 				       ARRAY_SIZE(gcc_dfs_clocks));
 	if (ret)
 		return ret;
+
+	/* Enalbling always ON clocks */
+	clk_restore_critical_clocks(&pdev->dev);
 
 	ret = qcom_cc_really_probe(pdev, &gcc_neo_desc, regmap);
 	if (ret) {

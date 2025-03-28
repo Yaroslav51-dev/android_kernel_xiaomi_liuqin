@@ -20,6 +20,7 @@
 #include <linux/spinlock.h>
 #include <linux/log2.h>
 #include <linux/sizes.h>
+#include <linux/suspend.h>
 #include <soc/qcom/dcvs.h>
 #include <trace/hooks/sched.h>
 #include "bwmon.h"
@@ -828,6 +829,19 @@ static int configure_hwmon_node(struct bw_hwmon *hwmon)
 	return 0;
 }
 
+static int bwmon_pm_notifier(struct notifier_block *nb, unsigned long action,
+				void *unused)
+{
+	struct bw_hwmon *hw = container_of(nb, struct bw_hwmon, pm_nb);
+
+	if (action == PM_HIBERNATION_PREPARE)
+		stop_monitor(hw);
+	else if (action == PM_POST_HIBERNATION)
+		start_monitor(hw);
+
+	return NOTIFY_OK;
+}
+
 #define ENABLE_MASK BIT(0)
 static __always_inline void mon_enable(struct bwmon *m, enum mon_reg_type type)
 {
@@ -1513,10 +1527,8 @@ static __always_inline int __start_bw_hwmon(struct bw_hwmon *hw,
 			ret);
 		return ret;
 	}
-	INIT_WORK(&hw->work, &bwmon_monitor_work);
 
 	mon_disable(m, type);
-
 	mon_clear(m, false, type);
 
 	switch (type) {
@@ -1565,6 +1577,7 @@ void __stop_bw_hwmon(struct bw_hwmon *hw, enum mon_reg_type type)
 
 	bwmon_monitor_stop(hw);
 	mon_irq_disable(m, type);
+	synchronize_irq(m->irq);
 	free_irq(m->irq, m);
 	mon_disable(m, type);
 	mon_clear(m, true, type);
@@ -1806,6 +1819,10 @@ static int qcom_bwmon_driver_probe(struct platform_device *pdev)
 						bwmon_jiffies_update_cb, NULL);
 	}
 	mutex_unlock(&bwmon_lock);
+
+	INIT_WORK(&m->hw.work, &bwmon_monitor_work);
+	m->hw.pm_nb.notifier_call = bwmon_pm_notifier;
+	register_pm_notifier(&m->hw.pm_nb);
 	ret = start_monitor(&m->hw);
 	if (ret < 0) {
 		dev_err(dev, "Error starting BWMON monitor: %d\n", ret);
@@ -1847,12 +1864,6 @@ static int __init qcom_bwmon_init(void)
 	return platform_driver_register(&qcom_bwmon_driver);
 }
 module_init(qcom_bwmon_init);
-
-static __exit void qcom_bwmon_exit(void)
-{
-	platform_driver_unregister(&qcom_bwmon_driver);
-}
-module_exit(qcom_bwmon_exit);
 
 MODULE_DESCRIPTION("QCOM BWMON driver");
 MODULE_LICENSE("GPL v2");

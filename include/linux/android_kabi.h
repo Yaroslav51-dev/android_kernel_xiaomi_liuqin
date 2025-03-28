@@ -33,6 +33,7 @@
 #define _ANDROID_KABI_H
 
 #include <linux/compiler.h>
+#include <linux/stringify.h>
 
 /*
  * Worker macros, don't use these, use the ones without a leading '_'
@@ -83,7 +84,7 @@
  *   number: the "number" of the padding variable in the structure.  Start with
  *   1 and go up.
  */
-#ifdef CONFIG_ANDROID_STRUCT_PADDING
+#ifdef CONFIG_ANDROID_KABI_RESERVE
 #define ANDROID_KABI_RESERVE(number)	_ANDROID_KABI_RESERVE(number)
 #else
 #define ANDROID_KABI_RESERVE(number)

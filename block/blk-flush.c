@@ -236,8 +236,10 @@ static void flush_end_io(struct request *flush_rq, blk_status_t error)
 	 * avoiding use-after-free.
 	 */
 	WRITE_ONCE(flush_rq->state, MQ_RQ_IDLE);
-	if (fq->rq_status != BLK_STS_OK)
+	if (fq->rq_status != BLK_STS_OK) {
 		error = fq->rq_status;
+		fq->rq_status = BLK_STS_OK;
+	}
 
 	if (!q->elevator) {
 		flush_rq->tag = BLK_MQ_NO_TAG;
@@ -465,11 +467,13 @@ int blkdev_issue_flush(struct block_device *bdev, gfp_t gfp_mask)
 }
 EXPORT_SYMBOL(blkdev_issue_flush);
 
+#include <trace/hooks/block.h>
 struct blk_flush_queue *blk_alloc_flush_queue(int node, int cmd_size,
 					      gfp_t flags)
 {
 	struct blk_flush_queue *fq;
 	int rq_sz = sizeof(struct request);
+	bool skip = false;
 
 	fq = kzalloc_node(sizeof(*fq), flags, node);
 	if (!fq)
@@ -477,8 +481,12 @@ struct blk_flush_queue *blk_alloc_flush_queue(int node, int cmd_size,
 
 	spin_lock_init(&fq->mq_flush_lock);
 
-	rq_sz = round_up(rq_sz + cmd_size, cache_line_size());
-	fq->flush_rq = kzalloc_node(rq_sz, flags, node);
+	trace_android_vh_blk_alloc_flush_queue(&skip, cmd_size, flags, node,
+					       fq);
+	if (!skip) {
+		rq_sz = round_up(rq_sz + cmd_size, cache_line_size());
+		fq->flush_rq = kzalloc_node(rq_sz, flags, node);
+	}
 	if (!fq->flush_rq)
 		goto fail_rq;
 

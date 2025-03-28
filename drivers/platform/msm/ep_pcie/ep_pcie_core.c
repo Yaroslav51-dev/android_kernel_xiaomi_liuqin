@@ -85,11 +85,14 @@ static struct ep_pcie_clk_info_t
 	{NULL, "pcie_pipe_clk_mux", 0, false},
 	{NULL, "pcie_pipe_clk_ext_src", 0, false},
 	{NULL, "pcie_0_ref_clk_src", 0, false},
+	{NULL, "pcie_aggre_noc_pcie_sf_axi_clk", 0, false},
+	{NULL, "pcie_cfg_noc_pcie_anoc_ahb_clk", 0, false},
 };
 
 static struct ep_pcie_clk_info_t
 	ep_pcie_pipe_clk_info[EP_PCIE_MAX_PIPE_CLK] = {
 	{NULL, "pcie_pipe_clk", 62500000, true},
+	{NULL, "pcie_pipe_div2_clk", 0, false},
 };
 
 static struct ep_pcie_reset_info_t
@@ -123,6 +126,42 @@ static const struct ep_pcie_irq_info_t ep_pcie_irq_info[EP_PCIE_MAX_IRQ] = {
 };
 
 static int ep_pcie_core_wakeup_host_internal(enum ep_pcie_event event);
+static int ep_pcie_set_link_width(struct ep_pcie_dev_t *dev,
+				   u16 target_link_width);
+
+/*
+ * ep_pcie_clk_dump - Clock CBCR reg info will be dumped in Dmesg logs.
+ * @dev: PCIe endpoint device structure.
+ */
+void ep_pcie_clk_dump(struct ep_pcie_dev_t *dev)
+{
+	struct ep_pcie_clk_info_t *info;
+	int i;
+
+	for (i = 0; i < EP_PCIE_MAX_CLK; i++) {
+		info = &dev->clk[i];
+
+		if (!info->hdl) {
+			EP_PCIE_DBG(dev,
+				"PCIe V%d:  handle of Clock %s is NULL\n",
+				dev->rev, info->name);
+		} else {
+			qcom_clk_dump(info->hdl, NULL, 0);
+		}
+	}
+
+	for (i = 0; i < EP_PCIE_MAX_PIPE_CLK; i++) {
+		info = &dev->pipeclk[i];
+
+		if (!info->hdl) {
+			EP_PCIE_ERR(dev,
+				"PCIe V%d:  handle of Pipe Clock %s is NULL\n",
+				dev->rev, info->name);
+		} else {
+			qcom_clk_dump(info->hdl, NULL, 0);
+		}
+	}
+}
 
 int ep_pcie_get_debug_mask(void)
 {
@@ -363,11 +402,20 @@ static int ep_pcie_clk_init(struct ep_pcie_dev_t *dev)
 	EP_PCIE_DBG(dev, "PCIe V%d\n", dev->rev);
 
 	rc = regulator_enable(dev->gdsc);
-
 	if (rc) {
 		EP_PCIE_ERR(dev, "PCIe V%d: fail to enable GDSC for %s\n",
 			dev->rev, dev->pdev->name);
 		return rc;
+	}
+
+	if (dev->gdsc_phy) {
+		rc = regulator_enable(dev->gdsc_phy);
+		if (rc) {
+			EP_PCIE_ERR(dev, "PCIe V%d: fail to enable GDSC_PHY for %s\n",
+				dev->rev, dev->pdev->name);
+			regulator_disable(dev->gdsc);
+			return rc;
+		}
 	}
 
 	/* switch pipe clock source after gdsc is turned on */
@@ -435,6 +483,8 @@ static int ep_pcie_clk_init(struct ep_pcie_dev_t *dev)
 		if (dev->pipe_clk_mux && dev->ref_clk_src)
 			clk_set_parent(dev->pipe_clk_mux, dev->ref_clk_src);
 
+		if (dev->gdsc_phy)
+			regulator_disable(dev->gdsc_phy);
 		regulator_disable(dev->gdsc);
 	}
 
@@ -463,6 +513,8 @@ static void ep_pcie_clk_deinit(struct ep_pcie_dev_t *dev)
 		if (dev->pipe_clk_mux && dev->ref_clk_src)
 			clk_set_parent(dev->pipe_clk_mux, dev->ref_clk_src);
 
+		if (dev->gdsc_phy)
+			regulator_disable(dev->gdsc_phy);
 		regulator_disable(dev->gdsc);
 	}
 }
@@ -530,6 +582,14 @@ static void ep_pcie_pipe_clk_deinit(struct ep_pcie_dev_t *dev)
 		if (dev->pipeclk[i].hdl)
 			clk_disable_unprepare(
 				dev->pipeclk[i].hdl);
+}
+
+static void ep_pcie_irq_deinit(struct ep_pcie_dev_t *dev)
+{
+	EP_PCIE_DBG(dev, "PCIe V%d\n", dev->rev);
+
+	if (dev->perst_irq >= 0)
+		disable_irq(dev->perst_irq);
 }
 
 static void ep_pcie_bar_init(struct ep_pcie_dev_t *dev)
@@ -672,6 +732,9 @@ static void ep_pcie_core_init(struct ep_pcie_dev_t *dev, bool configured)
 		ep_pcie_write_mask(dev->dm_core +
 				PCIE20_LINK_CONTROL2_LINK_STATUS2,
 				0xf, dev->link_speed);
+
+		if (dev->link_width)
+			ep_pcie_set_link_width(dev, dev->link_width << PCI_EXP_LNKSTA_NLW_SHIFT);
 
 		EP_PCIE_DBG2(dev, "PCIe V%d: Clear disconn_req after D3_COLD\n",
 			     dev->rev);
@@ -1181,6 +1244,18 @@ static int ep_pcie_get_resources(struct ep_pcie_dev_t *dev,
 			dev->rev, dev->pdev->name);
 		ret = PTR_ERR(dev->gdsc);
 		goto out;
+	}
+
+	dev->gdsc_phy = devm_regulator_get(&pdev->dev, "gdsc-phy-vdd");
+	if (IS_ERR(dev->gdsc_phy)) {
+		EP_PCIE_ERR(dev, "PCIe V%d:  Failed to get %s GDSC_PHY:%ld\n",
+			dev->rev, dev->pdev->name, PTR_ERR(dev->gdsc_phy));
+		if (PTR_ERR(dev->gdsc_phy) == -EPROBE_DEFER) {
+			EP_PCIE_DBG(dev, "PCIe V%d: EPROBE_DEFER for %s GDSC PHY\n",
+			dev->rev, dev->pdev->name);
+			ret = PTR_ERR(dev->gdsc_phy);
+			goto out;
+		}
 	}
 
 	for (i = 0; i < EP_PCIE_MAX_GPIO; i++) {
@@ -1698,12 +1773,72 @@ static void ep_pcie_core_toggle_wake_gpio(bool is_on)
 
 }
 
+static int ep_pcie_set_link_width(struct ep_pcie_dev_t *dev,
+				   u16 target_link_width)
+{
+	u16 link_width, link_width_max;
+
+	switch (target_link_width) {
+	case PCI_EXP_LNKSTA_NLW_X1:
+		link_width = LINK_WIDTH_X1;
+		break;
+	case PCI_EXP_LNKSTA_NLW_X2:
+		link_width = LINK_WIDTH_X2;
+		break;
+	case PCI_EXP_LNKSTA_NLW_X4:
+		link_width = LINK_WIDTH_X4;
+		break;
+	case PCI_EXP_LNKSTA_NLW_X8:
+		link_width = LINK_WIDTH_X8;
+		break;
+	default:
+		EP_PCIE_INFO(dev, "PCIe V%d: Invalid link width value paased\n", dev->rev);
+		return 0;
+	}
+
+	/*
+	 * From DWC data book 5.20a section 3.2.1
+	 * Program the LINK_CAPABLE field of PORT_LINK_CTRL
+	 */
+	ep_pcie_write_reg_field(dev->dm_core,
+				 PCIE20_PORT_LINK_CTRL_REG,
+				 LINK_WIDTH_MASK << LINK_WIDTH_SHIFT,
+				 link_width);
+
+	/* Set NUM_OF_LANES in GEN2_CTRL_OFF */
+	ep_pcie_write_reg_field(dev->dm_core,
+				 PCIE20_GEN3_GEN2_CTRL,
+				 NUM_OF_LANES_MASK << NUM_OF_LANES_SHIFT,
+				 link_width);
+
+	/* enable write access to RO register */
+	ep_pcie_write_mask(dev->dm_core + PCIE20_MISC_CONTROL_1, 0, BIT(0));
+
+	/* Set Maximum link width as current width */
+	ep_pcie_write_reg_field(dev->dm_core, PCIE20_LINK_CAPABILITIES,
+				 PCI_EXP_LNKCAP_MLW, link_width);
+
+	/* disable write access to RO register */
+	ep_pcie_write_mask(dev->dm_core + PCIE20_MISC_CONTROL_1, BIT(0), 0);
+
+	link_width_max =
+		(readl_relaxed(dev->dm_core + PCIE20_LINK_CAPABILITIES) &
+			       PCI_EXP_LNKCAP_MLW) >> PCI_EXP_LNKSTA_NLW_SHIFT;
+	EP_PCIE_DBG(dev,
+			"PCIe V%d: updated maximum link width supported to: %d\n",
+				dev->rev, link_width_max);
+
+	return 0;
+
+};
+
 int ep_pcie_core_enable_endpoint(enum ep_pcie_options opt)
 {
 	int ret = 0;
 	u32 val = 0;
 	u32 retries = 0;
 	u32 bme = 0;
+	bool perst = true;
 	bool ltssm_en = false;
 	struct ep_pcie_dev_t *dev = &ep_pcie_dev;
 
@@ -1919,6 +2054,7 @@ int ep_pcie_core_enable_endpoint(enum ep_pcie_options opt)
 			dev->rev);
 		ret = EP_PCIE_ERROR;
 		ep_pcie_reg_dump(dev, BIT(EP_PCIE_RES_PHY), false);
+		ep_pcie_clk_dump(dev);
 		goto link_fail;
 	} else {
 		EP_PCIE_INFO(dev, "PCIe V%d: PCIe  PHY is ready\n", dev->rev);
@@ -1944,11 +2080,19 @@ int ep_pcie_core_enable_endpoint(enum ep_pcie_options opt)
 		if (retries % 100 == 0)
 			EP_PCIE_DBG(dev, "PCIe V%d: LTSSM_STATE:0x%x\n",
 					dev->rev, (val >> 0xC) & 0x3f);
+		perst = atomic_read(&dev->perst_deast) ? 1 : 0;
 	} while ((!(val & XMLH_LINK_UP) ||
 		!ep_pcie_confirm_linkup(dev, false))
-		&& (retries < LINK_UP_CHECK_MAX_COUNT));
+		&& (retries < LINK_UP_CHECK_MAX_COUNT) && perst);
 
-	if (retries == LINK_UP_CHECK_MAX_COUNT) {
+	if (!perst) {
+		dev->perst_ast_in_enum_counter++;
+		EP_PCIE_ERR(dev,
+				"PCIe V%d: Perst asserted No. %ld while waiting for link to be up\n",
+				dev->rev, dev->perst_ast_in_enum_counter);
+		ret = EP_PCIE_ERROR;
+		goto link_fail;
+	} else if (retries == LINK_UP_CHECK_MAX_COUNT) {
 		EP_PCIE_ERR(dev, "PCIe V%d: link initialization failed\n",
 			dev->rev);
 		ret = EP_PCIE_ERROR;
@@ -2356,7 +2500,21 @@ static int ep_pcie_enumeration(struct ep_pcie_dev_t *dev)
 		"PCIe V%d: start PCIe link enumeration per host side\n",
 		dev->rev);
 
-	ret = ep_pcie_core_enable_endpoint(EP_PCIE_OPT_ALL);
+	ret = ep_pcie_core_enable_endpoint(EP_PCIE_OPT_POWER_ON | EP_PCIE_OPT_ENUM_ASYNC);
+	/*
+	 * When there is no host attached ep driver is creating a huge boot delay about 35sec,
+	 * as our driver is waiting for the host to deassert PERST in response to WAKE. All this
+	 * waiting happening in the driver probe context. So it's delaying our driver probe
+	 * completion and thus affecting the overall kernel bootup. To avoid this scenario,
+	 * offloading the link training part to a worker thread context.
+	 *
+	 * This issue is seen mainly on products that can act as PCIe EP but can boot up from flash
+	 * without any dependency on the host (They can boot up irrespective of RC is attached
+	 * or not) and can function as standalone products with partial functionality.
+	 */
+	if (!(dev->link_status == EP_PCIE_LINK_ENABLED ||
+		dev->link_status == EP_PCIE_LINK_UP))
+		schedule_work(&dev->handle_enumeration_work);
 
 	if (ret) {
 		EP_PCIE_ERR(&ep_pcie_dev,
@@ -2404,6 +2562,41 @@ static void handle_d3cold_func(struct work_struct *work)
 				atomic_read(&dev->ep_pcie_dev_wake));
 	}
 	spin_unlock_irqrestore(&dev->isr_lock, irqsave_flags);
+}
+
+/*
+ * handle_enumeration_func - workqueue function will handle link enumeration.
+ * @work: PCIe endpoint handle_enumeration_work structure.
+ */
+static void handle_enumeration_func(struct work_struct *work)
+{
+	int ret;
+
+	struct ep_pcie_dev_t *dev = container_of(work,
+			struct ep_pcie_dev_t, handle_enumeration_work);
+
+	ret = ep_pcie_core_enable_endpoint(EP_PCIE_OPT_ENUM_ASYNC | EP_PCIE_OPT_AST_WAKE
+						| EP_PCIE_OPT_ENUM);
+	if (ret) {
+		EP_PCIE_ERR(&ep_pcie_dev,
+			"PCIe V%d: PCIe link enumeration failed\n",
+			ep_pcie_dev.rev);
+	} else {
+		if (dev->link_status == EP_PCIE_LINK_UP) {
+			EP_PCIE_INFO(&ep_pcie_dev,
+				"PCIe V%d: PCIe link training is successful with host side. Waiting for enumeration to complete\n",
+				ep_pcie_dev.rev);
+		} else if (dev->link_status != EP_PCIE_LINK_ENABLED) {
+			EP_PCIE_ERR(&ep_pcie_dev,
+				"PCIe V%d: PCIe link is in the unexpected status: %d\n",
+				ep_pcie_dev.rev, dev->link_status);
+			if (!ep_pcie_debug_keep_resource) {
+				ep_pcie_irq_deinit(&ep_pcie_dev);
+				ep_pcie_gpio_deinit(&ep_pcie_dev);
+				ep_pcie_release_resources(&ep_pcie_dev);
+			}
+		}
+	}
 }
 
 static void handle_bme_func(struct work_struct *work)
@@ -2633,6 +2826,7 @@ int32_t ep_pcie_irq_init(struct ep_pcie_dev_t *dev)
 	EP_PCIE_DBG(dev, "PCIe V%d\n", dev->rev);
 
 	/* Initialize all works to be performed before registering for IRQs*/
+	INIT_WORK(&dev->handle_enumeration_work, handle_enumeration_func);
 	INIT_WORK(&dev->handle_bme_work, handle_bme_func);
 	INIT_WORK(&dev->handle_d3cold_work, handle_d3cold_func);
 
@@ -2793,14 +2987,6 @@ perst_irq:
 	}
 
 	return 0;
-}
-
-void ep_pcie_irq_deinit(struct ep_pcie_dev_t *dev)
-{
-	EP_PCIE_DBG(dev, "PCIe V%d\n", dev->rev);
-
-	if (dev->perst_irq >= 0)
-		disable_irq(dev->perst_irq);
 }
 
 int ep_pcie_core_register_event(struct ep_pcie_register_event *reg)
@@ -3293,6 +3479,17 @@ static int ep_pcie_probe(struct platform_device *pdev)
 	else
 		EP_PCIE_DBG(&ep_pcie_dev, "PCIe V%d: pcie-link-speed:%d\n",
 			ep_pcie_dev.rev, ep_pcie_dev.link_speed);
+
+	ret = of_property_read_u32((&pdev->dev)->of_node,
+				"num-lanes",
+				&ep_pcie_dev.link_width);
+	if (ret)
+		EP_PCIE_DBG(&ep_pcie_dev,
+			"PCIe V%d: num-lanes does not exist\n",
+			ep_pcie_dev.rev);
+	else
+		EP_PCIE_DBG(&ep_pcie_dev, "PCIe V%d: num-lanes:%d\n",
+			ep_pcie_dev.rev, ep_pcie_dev.link_width);
 
 	ep_pcie_dev.vendor_id = 0xFFFF;
 	ret = of_property_read_u16((&pdev->dev)->of_node,

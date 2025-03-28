@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #ifndef __KGSL_DEVICE_H
 #define __KGSL_DEVICE_H
@@ -70,6 +70,7 @@ enum kgsl_event_results {
 	{ KGSL_CONTEXT_SAVE_GMEM, "SAVE_GMEM" }, \
 	{ KGSL_CONTEXT_IFH_NOP, "IFH_NOP" }, \
 	{ KGSL_CONTEXT_SECURE, "SECURE" }, \
+	{ KGSL_CONTEXT_LPAC, "LPAC" }, \
 	{ KGSL_CONTEXT_NO_SNAPSHOT, "NO_SNAPSHOT" }
 
 #define KGSL_CONTEXT_ID(_context) \
@@ -82,6 +83,7 @@ struct kgsl_context;
 struct kgsl_power_stats;
 struct kgsl_event;
 struct kgsl_snapshot;
+struct kgsl_sync_fence;
 
 struct kgsl_functable {
 	/* Mandatory functions - these functions must be implemented
@@ -108,7 +110,8 @@ struct kgsl_functable {
 	void (*power_stats)(struct kgsl_device *device,
 		struct kgsl_power_stats *stats);
 	void (*snapshot)(struct kgsl_device *device,
-		struct kgsl_snapshot *snapshot, struct kgsl_context *context);
+		struct kgsl_snapshot *snapshot, struct kgsl_context *context,
+		struct kgsl_context *context_lpac);
 	/** @drain_and_idle: Drain the GPU and wait for it to idle */
 	int (*drain_and_idle)(struct kgsl_device *device);
 	struct kgsl_device_private * (*device_private_create)(void);
@@ -165,6 +168,10 @@ struct kgsl_functable {
 	/** @dequeue_recurring_cmd: Dequeue recurring commands from GMU */
 	int (*dequeue_recurring_cmd)(struct kgsl_device *device,
 		struct kgsl_context *context);
+	/** @create_hw_fence: Create a hardware fence */
+	void (*create_hw_fence)(struct kgsl_device *device, struct kgsl_sync_fence *kfence);
+	/** @register_gdsc_notifier: Target specific function to register gdsc notifier */
+	int (*register_gdsc_notifier)(struct kgsl_device *device);
 };
 
 struct kgsl_ioctl {
@@ -273,7 +280,7 @@ struct kgsl_device {
 	struct kgsl_pwrscale pwrscale;
 
 	int reset_counter; /* Track how many GPU core resets have occurred */
-	struct workqueue_struct *events_wq;
+	struct kthread_worker *events_worker;
 
 	/* Number of active contexts seen globally for this device */
 	int active_context_count;
@@ -312,6 +319,29 @@ struct kgsl_device {
 	bool pdev_loaded;
 	/** @nh: Pointer to head of the SRCU notifier chain */
 	struct srcu_notifier_head nh;
+	/** @freq_limiter_irq_clear: reset controller to clear freq limiter irq */
+	struct reset_control *freq_limiter_irq_clear;
+	/** @freq_limiter_intr_num: The interrupt number for freq limiter */
+	int freq_limiter_intr_num;
+	/** @bcl_data_kobj: Kobj for bcl_data sysfs node */
+	struct kobject bcl_data_kobj;
+	/** @idle_jiffies: Latest idle jiffies */
+	unsigned long idle_jiffies;
+
+	/** @work_period_timer: Timer to capture application GPU work stats */
+	struct timer_list work_period_timer;
+	/** work_period_lock: Lock to protect process application GPU work periods */
+	spinlock_t work_period_lock;
+	/** work_period_ws: Worker thread to emulate application GPU work event */
+	struct work_struct work_period_ws;
+	/** @flags: Flags for gpu_period stats */
+	unsigned long flags;
+	struct {
+		u64 begin;
+		u64 end;
+	} gpu_period;
+	/** @dump_all_ibs: Whether to dump all ibs in snapshot */
+	bool dump_all_ibs;
 };
 
 #define KGSL_MMU_DEVICE(_mmu) \
@@ -489,6 +519,8 @@ struct kgsl_process_private {
 	 * @reclaim_lock: Mutex lock to protect KGSL_PROC_PINNED_STATE
 	 */
 	struct mutex reclaim_lock;
+	/** @period: Stats for GPU utilization */
+	struct gpu_work_period *period;
 	/**
 	 * @cmd_count: The number of cmds that are active for the process
 	 */
@@ -502,6 +534,10 @@ struct kgsl_process_private {
 	 * @private_mutex: Mutex lock to protect kgsl_process_private
 	 */
 	struct mutex private_mutex;
+	/**
+	 * @cmdline: Cmdline string of the process
+	 */
+	char *cmdline;
 };
 
 struct kgsl_device_private {
@@ -513,8 +549,10 @@ struct kgsl_device_private {
  * struct kgsl_snapshot - details for a specific snapshot instance
  * @ib1base: Active IB1 base address at the time of fault
  * @ib2base: Active IB2 base address at the time of fault
+ * @ib3base: Active IB3 base address at the time of fault
  * @ib1size: Number of DWORDS pending in IB1 at the time of fault
  * @ib2size: Number of DWORDS pending in IB2 at the time of fault
+ * @ib3size: Number of DWORDS pending in IB3 at the time of fault
  * @ib1dumped: Active IB1 dump status to sansphot binary
  * @ib2dumped: Active IB2 dump status to sansphot binary
  * @start: Pointer to the start of the static snapshot region
@@ -534,12 +572,20 @@ struct kgsl_device_private {
  * @recovered: True if GPU was recovered after previous snapshot
  */
 struct kgsl_snapshot {
-	uint64_t ib1base;
-	uint64_t ib2base;
-	unsigned int ib1size;
-	unsigned int ib2size;
+	u64 ib1base;
+	u64 ib2base;
+	u64 ib3base;
+	u32 ib1size;
+	u32 ib2size;
+	u32 ib3size;
 	bool ib1dumped;
 	bool ib2dumped;
+	u64 ib1base_lpac;
+	u64 ib2base_lpac;
+	u32 ib1size_lpac;
+	u32 ib2size_lpac;
+	bool ib1dumped_lpac;
+	bool ib2dumped_lpac;
 	u8 *start;
 	size_t size;
 	u8 *ptr;
@@ -552,6 +598,7 @@ struct kgsl_snapshot {
 	struct work_struct work;
 	struct completion dump_gate;
 	struct kgsl_process_private *process;
+	struct kgsl_process_private *process_lpac;
 	unsigned int sysfs_read;
 	bool first_read;
 	bool recovered;
@@ -583,6 +630,18 @@ static inline void kgsl_regread(struct kgsl_device *device,
 				unsigned int *value)
 {
 	*value = kgsl_regmap_read(&device->regmap, offsetwords);
+}
+
+static inline void kgsl_regread64(struct kgsl_device *device,
+				u32 offsetwords_lo, u32 offsetwords_hi,
+				u64 *value)
+{
+	u32 val_lo = 0, val_hi = 0;
+
+	val_lo = kgsl_regmap_read(&device->regmap, offsetwords_lo);
+	val_hi = kgsl_regmap_read(&device->regmap, offsetwords_hi);
+
+	*value = (((u64)val_hi << 32) | val_lo);
 }
 
 static inline void kgsl_regwrite(struct kgsl_device *device,
@@ -619,8 +678,8 @@ static inline bool kgsl_state_is_nap_or_minbw(struct kgsl_device *device)
  */
 static inline void kgsl_start_idle_timer(struct kgsl_device *device)
 {
-	mod_timer(&device->idle_timer,
-			jiffies + msecs_to_jiffies(device->pwrctrl.interval_timeout));
+	device->idle_jiffies = jiffies + msecs_to_jiffies(device->pwrctrl.interval_timeout);
+	mod_timer(&device->idle_timer, device->idle_jiffies);
 }
 
 int kgsl_readtimestamp(struct kgsl_device *device, void *priv,
@@ -646,7 +705,8 @@ const char *kgsl_pwrstate_to_str(unsigned int state);
 void kgsl_device_snapshot_probe(struct kgsl_device *device, u32 size);
 
 void kgsl_device_snapshot(struct kgsl_device *device,
-			struct kgsl_context *context, bool gmu_fault);
+			struct kgsl_context *context, struct kgsl_context *context_lpac,
+			bool gmu_fault);
 void kgsl_device_snapshot_close(struct kgsl_device *device);
 
 void kgsl_events_init(void);
@@ -1031,5 +1091,19 @@ static inline void kgsl_trace_gpu_mem_total(struct kgsl_device *device,
 static inline void kgsl_trace_gpu_mem_total(struct kgsl_device *device,
 						s64 delta) {}
 #endif
+
+/*
+ * kgsl_context_is_lpac() - Checks if context is LPAC
+ * @context: KGSL context to check
+ *
+ * Function returns true if context is LPAC else false
+ */
+static inline bool kgsl_context_is_lpac(struct kgsl_context *context)
+{
+	if (context == NULL)
+		return false;
+
+	return (context->flags & KGSL_CONTEXT_LPAC) ? true : false;
+}
 
 #endif  /* __KGSL_DEVICE_H */

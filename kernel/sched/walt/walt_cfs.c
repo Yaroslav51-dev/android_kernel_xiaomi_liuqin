@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <trace/hooks/sched.h>
@@ -233,7 +233,8 @@ static inline int walt_get_mvp_task_prio(struct task_struct *p);
 static void walt_find_best_target(struct sched_domain *sd,
 					cpumask_t *candidates,
 					struct task_struct *p,
-					struct find_best_target_env *fbt_env)
+					struct find_best_target_env *fbt_env,
+					bool *force_energy_eval)
 {
 	unsigned long min_task_util = uclamp_task_util(p);
 	long target_max_spare_cap = 0;
@@ -252,6 +253,9 @@ static void walt_find_best_target(struct sched_domain *sd,
 	bool rtg_high_prio_task = task_rtg_high_prio(p);
 	cpumask_t visit_cpus;
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+	unsigned int search_sibling_cluster = 0;
+	int cpu;
+	bool visited_clusters[MAX_CLUSTERS] = {[0 ... (MAX_CLUSTERS-1)] = false};
 
 	/* Find start CPU based on boost value */
 	start_cpu = fbt_env->start_cpu;
@@ -278,29 +282,45 @@ static void walt_find_best_target(struct sched_domain *sd,
 				cpumask_test_cpu(prev_cpu, p->cpus_ptr)) {
 		fbt_env->fastpath = PREV_CPU_FASTPATH;
 		cpumask_set_cpu(prev_cpu, candidates);
+		visited_clusters[cpu_cluster(prev_cpu)->id] = true;
 		goto out;
 	}
 
+/* retry for sibling clusters */
+retry:
 	for (cluster = 0; cluster < num_sched_clusters; cluster++) {
 		int best_idle_cpu_cluster = -1;
 		int target_cpu_cluster = -1;
 		int this_complex_idle = 0;
 		int best_complex_idle = 0;
+		int cluster_id;
 
 		target_max_spare_cap = 0;
 		min_exit_latency = INT_MAX;
 		best_idle_cuml_util = ULONG_MAX;
 
-		cpumask_and(&visit_cpus, &p->cpus_mask,
-				&cpu_array[order_index][cluster]);
+		if (search_sibling_cluster) {
+			if (!(search_sibling_cluster & BIT(cluster)))
+				continue;
+			cluster_id = cluster;
+			cpumask_and(&visit_cpus, p->cpus_ptr, &sched_cluster[cluster]->cpus);
+		} else {
+			cpumask_and(&visit_cpus, p->cpus_ptr, &cpu_array[order_index][cluster]);
+			cluster_id = cpu_cluster(
+					cpumask_first(&cpu_array[order_index][cluster]))->id;
+		}
+
+		if (visited_clusters[cluster_id])
+			continue;
+
+		visited_clusters[cluster_id] = true;
+
 		for_each_cpu(i, &visit_cpus) {
 			unsigned long capacity_orig = capacity_orig_of(i);
 			unsigned long wake_cpu_util, new_cpu_util, new_util_cuml;
 			long spare_cap;
 			unsigned int idle_exit_latency = UINT_MAX;
 			struct walt_rq *wrq = (struct walt_rq *) cpu_rq(i)->android_vendor_data1;
-			struct task_struct *curr = cpu_rq(i)->curr;
-			bool curr_is_mvp = false;
 
 			trace_sched_cpu_util(i);
 			/* record the prss as we visit cpus in a cluster */
@@ -322,10 +342,7 @@ static void walt_find_best_target(struct sched_domain *sd,
 			if (fbt_env->skip_cpu == i)
 				continue;
 
-			raw_spin_lock(&cpu_rq(i)->lock);
-			curr_is_mvp = is_mvp_task(cpu_rq(i), curr);
-			raw_spin_unlock(&cpu_rq(i)->lock);
-			if (curr_is_mvp)
+			if (wrq->num_mvp_tasks > 0)
 				continue;
 
 			/*
@@ -478,6 +495,20 @@ static void walt_find_best_target(struct sched_domain *sd,
 	}
 
 out:
+	search_sibling_cluster = 0;
+	for_each_cpu(cpu, candidates) {
+		struct walt_sched_cluster *cluster = cpu_cluster(cpu);
+		int sibling = cluster->sibling_cluster;
+
+		if ((sibling >= 0) && !visited_clusters[sibling]) {
+			search_sibling_cluster |= BIT(sibling);
+		}
+	}
+	if (search_sibling_cluster) {
+		*force_energy_eval = true;
+		goto retry;
+	}
+
 	trace_sched_find_best_target(p, min_task_util, start_cpu, cpumask_bits(candidates)[0],
 			     most_spare_cap_cpu, order_index, end_index,
 			     fbt_env->skip_cpu, task_on_rq_queued(p), least_nr_cpu,
@@ -776,6 +807,7 @@ int walt_find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	int first_cpu;
 	bool energy_eval_needed = true;
 	struct compute_energy_output output;
+	bool force_energy_eval = false;
 
 	if (walt_is_many_wakeup(sibling_count_hint) && prev_cpu != cpu &&
 			cpumask_test_cpu(prev_cpu, &p->cpus_mask))
@@ -808,7 +840,8 @@ int walt_find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		sync = 0;
 
 	if (sysctl_sched_sync_hint_enable && sync
-			&& bias_to_this_cpu(p, cpu, start_cpu)) {
+			&& bias_to_this_cpu(p, cpu, start_cpu)
+			&& (cpu_cluster(cpu)->sibling_cluster == -1)) {
 		best_energy_cpu = cpu;
 		fbt_env.fastpath = SYNC_WAKEUP;
 		goto unlock;
@@ -827,7 +860,7 @@ int walt_find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 	fbt_env.skip_cpu = walt_is_many_wakeup(sibling_count_hint) ?
 			   cpu : -1;
 
-	walt_find_best_target(NULL, candidates, p, &fbt_env);
+	walt_find_best_target(NULL, candidates, p, &fbt_env, &force_energy_eval);
 
 	/* Bail out if no candidate was found. */
 	weight = cpumask_weight(candidates);
@@ -847,7 +880,7 @@ int walt_find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 		goto unlock;
 	}
 
-	if (!energy_eval_needed) {
+	if (!energy_eval_needed && !force_energy_eval) {
 		int max_spare_cpu = first_cpu;
 
 		for_each_cpu(cpu, candidates) {
@@ -1126,6 +1159,9 @@ static void walt_cfs_account_mvp_runtime(struct rq *rq, struct task_struct *curr
 		trace_walt_cfs_deactivate_mvp_task(curr, wts, limit);
 		return;
 	}
+
+	if (wrq->num_mvp_tasks == 1)
+		return;
 
 	/* slice expired. re-queue the task */
 	list_del(&wts->mvp_list);

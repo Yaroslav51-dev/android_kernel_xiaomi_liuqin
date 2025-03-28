@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
+
+#define pr_fmt(fmt) "%s:[%s][%d]: " fmt, KBUILD_MODNAME, __func__, __LINE__
+
 #include <linux/debugfs.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
@@ -17,17 +21,22 @@
 #include <linux/of.h>
 #include <linux/dma-buf.h>
 #include <linux/qcom_scm.h>
+#include <linux/pm.h>
 #include <soc/qcom/qseecomi.h>
 #include <linux/qtee_shmbridge.h>
 #include <linux/proc_fs.h>
-#include <linux/wait.h>
-#include <linux/poll.h>
+#if IS_ENABLED(CONFIG_MSM_TMECOM_QMP)
+#include <linux/tmelog.h>
+#endif
 
 /* QSEE_LOG_BUF_SIZE = 32K */
 #define QSEE_LOG_BUF_SIZE 0x8000
 
 /* enlarged qsee log buf size is 128K by default */
 #define QSEE_LOG_BUF_SIZE_V2 0x20000
+
+/* Tme log buffer size 20K */
+#define TME_LOG_BUF_SIZE 0x5000
 
 /* TZ Diagnostic Area legacy version number */
 #define TZBSP_DIAG_MAJOR_VERSION_LEGACY	2
@@ -376,6 +385,11 @@ struct hypdbg_t {
 	uint8_t log_buf_p[];
 };
 
+struct tme_log_pos {
+	uint32_t offset;
+	size_t size;
+};
+
 /*
  * Enumeration order for VMID's
  */
@@ -390,6 +404,7 @@ enum tzdbg_stats_type {
 	TZDBG_HYP_GENERAL,
 	TZDBG_HYP_LOG,
 	TZDBG_RM_LOG,
+	TZDBG_TME_LOG,
 	TZDBG_STATS_MAX
 };
 
@@ -398,15 +413,18 @@ struct tzdbg_stat {
 	size_t display_offset;
 	char *name;
 	char *data;
+	bool avail;
 };
 
 struct tzdbg {
 	void __iomem *virt_iobase;
 	void __iomem *hyp_virt_iobase;
 	void __iomem *rmlog_virt_iobase;
+	void __iomem *tmelog_virt_iobase;
 	struct tzdbg_t *diag_buf;
 	struct hypdbg_t *hyp_diag_buf;
 	uint8_t *rm_diag_buf;
+	uint8_t *tme_buf;
 	char *disp_buf;
 	int debug_tz[TZDBG_STATS_MAX];
 	struct tzdbg_stat stat[TZDBG_STATS_MAX];
@@ -459,6 +477,7 @@ static struct tzdbg tzdbg = {
 	.stat[TZDBG_HYP_GENERAL].name = "hyp_general",
 	.stat[TZDBG_HYP_LOG].name = "hyp_log",
 	.stat[TZDBG_RM_LOG].name = "rm_log",
+	.stat[TZDBG_TME_LOG].name = "tme_log",
 };
 
 static struct tzdbg_log_t *g_qsee_log;
@@ -468,10 +487,12 @@ static uint32_t debug_rw_buf_size;
 static uint32_t display_buf_size;
 static uint32_t qseelog_buf_size;
 static phys_addr_t disp_buf_paddr;
+static uint32_t tmecrashdump_address_offset;
 
 static uint64_t qseelog_shmbridge_handle;
 static struct encrypted_log_info enc_qseelog_info;
 static struct encrypted_log_info enc_tzlog_info;
+static bool restore_from_hibernation;
 
 extern wait_queue_head_t tzdbg_log_wq;
 /*
@@ -1059,6 +1080,15 @@ static int _disp_tz_log_stats(size_t count, bool check_state)
 	static struct tzdbg_log_pos_t log_start = {0};
 	struct tzdbg_log_v2_t *log_v2_ptr;
 	struct tzdbg_log_t *log_ptr;
+	/* wrap and offset are initialized to zero since tz is coldboot
+	 * during restoration from hibernation.the reason to initialise
+	 * the wrap and offset to zero since it contains previous boot
+	 * values and which are invalid now.
+	 */
+	if (restore_from_hibernation) {
+		log_start.wrap = log_start.offset = 0;
+		return 0;
+	}
 
 	log_ptr = (struct tzdbg_log_t *)((unsigned char *)tzdbg.diag_buf +
 			tzdbg.diag_buf->ring_off -
@@ -1157,8 +1187,18 @@ static int _disp_qsee_log_stats(size_t count, bool check_state)
 
 	if (!tzdbg.is_enlarged_buf)
 		return _disp_log_stats(g_qsee_log, &log_start,
-			QSEE_LOG_BUF_SIZE - sizeof(struct tzdbg_log_pos_t),
-			count, TZDBG_QSEE_LOG);
+					QSEE_LOG_BUF_SIZE - sizeof(struct tzdbg_log_pos_t),
+					count, TZDBG_QSEE_LOG);
+
+	/* wrap and offset are initialized to zero since tz is coldboot
+	 * during restoration from hibernation. The reason to initialise
+	 * the wrap and offset to zero since it contains previous values
+	 * and which are invalid now.
+	 */
+	if (restore_from_hibernation) {
+		log_start.wrap = log_start.offset = 0;
+		return 0;
+	}
 
 	return _disp_log_stats_v2(g_qsee_log_v2, &log_start_v2,
 		QSEE_LOG_BUF_SIZE_V2 - sizeof(struct tzdbg_log_pos_v2_t),
@@ -1200,6 +1240,61 @@ static int _disp_hyp_general_stats(size_t count)
 	tzdbg.stat[TZDBG_HYP_GENERAL].data = (char *)tzdbg.disp_buf;
 	return len;
 }
+
+#if IS_ENABLED(CONFIG_MSM_TMECOM_QMP)
+static int _disp_tme_log_stats(size_t count)
+{
+	static struct tme_log_pos log_start = { 0 };
+	static bool wrap_around = { false };
+	uint32_t buf_size;
+	uint8_t *log_ptr = NULL;
+	uint32_t log_len = 0;
+	int ret = 0;
+
+	/* Return 0 to close the display file */
+	if ((log_start.size == 0x0) && wrap_around) {
+		wrap_around = false;
+		return 0;
+	}
+
+	/* Copy TME log data to tzdbg diag buffer for the first time */
+	if (!wrap_around) {
+		if (tmelog_process_request(tmecrashdump_address_offset,
+								   TME_LOG_BUF_SIZE, &buf_size)) {
+			pr_err("Read tme log failed, ret=%d, buf_size: %#x\n", ret, buf_size);
+			return 0;
+		}
+		log_start.offset = 0x0;
+		log_start.size = buf_size;
+	}
+
+	log_ptr = tzdbg.tmelog_virt_iobase;
+	log_len = log_start.size;
+	log_ptr += log_start.offset;
+
+	/* Check if we exceed the max length provided by user space */
+	log_len = min(min((uint32_t)count, log_len), display_buf_size);
+
+	log_start.size -= log_len;
+	log_start.offset += log_len;
+	pr_debug("log_len: %d, log_start.offset: %#x, log_start.size: %#x\n",
+			log_len, log_start.offset, log_start.size);
+
+	if (log_start.size)
+		wrap_around =  true;
+
+	/* Copy TME log data to display buffer */
+	memcpy_fromio(tzdbg.disp_buf, log_ptr, log_len);
+
+	tzdbg.stat[TZDBG_TME_LOG].data = tzdbg.disp_buf;
+	return log_len;
+}
+#else
+static int _disp_tme_log_stats(size_t count)
+{
+	return 0;
+}
+#endif
 
 static ssize_t tzdbg_fs_read_unencrypted(int tz_id, char __user *buf,
 	size_t count, loff_t *offp)
@@ -1255,6 +1350,10 @@ static ssize_t tzdbg_fs_read_unencrypted(int tz_id, char __user *buf,
 		break;
 	case TZDBG_RM_LOG:
 		len = _disp_rm_log_stats(count);
+		*offp = 0;
+		break;
+	case TZDBG_TME_LOG:
+		len = _disp_tme_log_stats(count);
 		*offp = 0;
 		break;
 	default:
@@ -1372,7 +1471,7 @@ static ssize_t tzdbg_fs_read(struct file *file, char __user *buf,
 
 	if (!tzdbg.is_encrypted_log_enabled ||
 	    (tz_id == TZDBG_HYP_GENERAL || tz_id == TZDBG_HYP_LOG)
-	    || tz_id == TZDBG_RM_LOG)
+	    || tz_id == TZDBG_RM_LOG || tz_id == TZDBG_TME_LOG)
 		return tzdbg_fs_read_unencrypted(tz_id, buf, count, offp);
 	else
 		return tzdbg_fs_read_encrypted(tz_id, buf, count, offp);
@@ -1415,6 +1514,31 @@ struct proc_ops tzdbg_fops = {
 	.proc_release = tzdbg_procfs_release,
 	.proc_poll	  = tzdbg_procfs_poll,
 };
+
+static int tzdbg_init_tme_log(struct platform_device *pdev, void __iomem *virt_iobase)
+{
+	/*
+	 * Tme logs are dumped in tme log ddr region but that region is not
+	 * accessible to hlos. Instead, collect logs at tme crashdump ddr
+	 * region with tmecom interface and then display logs reading from
+	 * crashdump region.
+	 */
+	if (of_property_read_u32((&pdev->dev)->of_node, "tmecrashdump-address-offset",
+				&tmecrashdump_address_offset)) {
+		pr_err("Tme Crashdump address offset need to be defined!\n");
+		return -EINVAL;
+	}
+
+	tzdbg.tmelog_virt_iobase =
+		devm_ioremap(&pdev->dev, tmecrashdump_address_offset, TME_LOG_BUF_SIZE);
+	if (!tzdbg.tmelog_virt_iobase) {
+		pr_err("ERROR: Could not ioremap: start=%#x, len=%u\n",
+				tmecrashdump_address_offset, TME_LOG_BUF_SIZE);
+		return -ENXIO;
+	}
+
+	return 0;
+}
 
 /*
  * Allocates log buffer from ION, registers the buffer at TZ
@@ -1572,6 +1696,8 @@ static int  tzdbg_fs_init(struct platform_device *pdev)
 
 	for (i = 0; i < TZDBG_STATS_MAX; i++) {
 		tzdbg.debug_tz[i] = i;
+		if (!tzdbg.stat[i].avail)
+			continue;
 		dent = proc_create_data(tzdbg.stat[i].name,
 				0444, dent_dir,
 				&tzdbg_fops, &tzdbg.debug_tz[i]);
@@ -1755,7 +1881,14 @@ static int tz_log_probe(struct platform_device *pdev)
 	void __iomem *virt_iobase;
 	phys_addr_t tzdiag_phy_iobase;
 	uint32_t *ptr = NULL;
-	int ret = 0;
+	int ret = 0, i;
+
+	/*
+	 * By default all nodes will be created.
+	 * Mark avail as false later selectively if there's need to skip proc node creation.
+	 */
+	for (i = 0; i < TZDBG_STATS_MAX; i++)
+		tzdbg.stat[i].avail = true;
 
 	ret = tzdbg_get_tz_version();
 	if (ret)
@@ -1849,6 +1982,13 @@ static int tz_log_probe(struct platform_device *pdev)
 		}
 	}
 
+	/* Init for tme log */
+	ret = tzdbg_init_tme_log(pdev, virt_iobase);
+	if (ret < 0) {
+		tzdbg.stat[TZDBG_TME_LOG].avail = false;
+		pr_warn("Tme log initialization failed!\n");
+	}
+
 	/* register unencrypted qsee log buffer */
 	ret = tzdbg_register_qsee_log_buf(pdev);
 	if (ret)
@@ -1905,6 +2045,56 @@ static int tz_log_remove(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int tz_log_freeze(struct device *dev)
+{
+	/* This Boolean variable is maintained to initialise the ring buffer
+	 * log pointer to zero during restoration from hibernation
+	 */
+	restore_from_hibernation = true;
+	if (g_qsee_log)
+		dma_free_coherent(dev, QSEE_LOG_BUF_SIZE, (void *)g_qsee_log,
+					coh_pmem);
+
+	if (!tzdbg.is_encrypted_log_enabled)
+		qtee_shmbridge_deregister(qseelog_shmbridge_handle);
+
+	return 0;
+}
+
+static int tz_log_restore(struct device *dev)
+{
+	/* ring buffer log pointer needs to be re initialized
+	 * during restoration from hibernation.
+	 */
+	if (restore_from_hibernation) {
+		_disp_tz_log_stats(0);
+		_disp_qsee_log_stats(0);
+	}
+	/* Register the log bugger at TZ during hibernation resume.
+	 * After hibernation the log buffer is with HLOS as TZ encountered
+	 * a coldboot sequence.
+	 */
+	tzdbg_register_qsee_log_buf(to_platform_device(dev));
+	/* This is set back to zero after successful restoration
+	 * from hibernation.
+	 */
+	restore_from_hibernation = false;
+	return 0;
+}
+
+static const struct dev_pm_ops tz_log_pmops = {
+	.freeze = tz_log_freeze,
+	.restore = tz_log_restore,
+	.thaw = tz_log_restore,
+};
+
+#define TZ_LOG_PMOPS (&tz_log_pmops)
+
+#else
+#define TZ_LOG_PMOPS NULL
+#endif
+
 static const struct of_device_id tzlog_match[] = {
 	{.compatible = "qcom,tz-log"},
 	{}
@@ -1917,6 +2107,7 @@ static struct platform_driver tz_log_driver = {
 		.name = "tz_log",
 		.of_match_table = tzlog_match,
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+		.pm = TZ_LOG_PMOPS,
 	},
 };
 

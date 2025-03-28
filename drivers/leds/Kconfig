@@ -116,12 +116,20 @@ config LEDS_AS3645A
 config LEDS_AW2013
 	tristate "LED support for Awinic AW2013"
 	depends on LEDS_CLASS && I2C && OF
+	select REGMAP_I2C
 	help
 	  This option enables support for the AW2013 3-channel
 	  LED driver.
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called leds-aw2013.
+
+config LEDS_AW2016
+	tristate "LED Support for AW2016"
+	depends on LEDS_CLASS && I2C
+	help
+		this option enables support for the AW2016 RGB LED connected
+		through I2C. Say Y to enable support for the AW2016 LED
 
 config LEDS_BCM6328
 	tristate "LED Support for Broadcom BCM6328"
@@ -897,7 +905,7 @@ config LEDS_SPI_BYTE
 config LEDS_TI_LMU_COMMON
 	tristate "LED driver for TI LMU"
 	depends on LEDS_CLASS
-	depends on REGMAP
+	select REGMAP
 	help
 	  Say Y to enable the LED driver for TI LMU devices.
 	  This supports common features between the TI LM3532, LM3631, LM3632,

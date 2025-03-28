@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -24,12 +25,12 @@ struct kprobe_data {
 static int entry_usb_ep_set_maxpacket_limit(struct kretprobe_instance *ri,
 				struct pt_regs *regs)
 {
-	struct usb_ep *ep = (struct usb_ep *)regs->regs[0];
-	unsigned maxpacket_limit = (unsigned)regs->regs[1];
-
+	struct dwc3_ep *dep = (struct dwc3_ep *)regs->regs[0];
+	struct dwc3 *dwc = dep->dwc;
 	struct kprobe_data *data = (struct kprobe_data *)ri->data;
-	data->ep = ep;
-	data->xi0 = (int)maxpacket_limit;
+
+	data->dwc = dwc;
+	data->xi0 = dep->number;
 
 	return 0;
 }
@@ -38,11 +39,14 @@ static int exit_usb_ep_set_maxpacket_limit(struct kretprobe_instance *ri,
 				struct pt_regs *regs)
 {
 	struct kprobe_data *data = (struct kprobe_data *)ri->data;
+	struct dwc3 *dwc = data->dwc;
+	u8 epnum = data->xi0;
+	struct dwc3_ep *dep = dwc->eps[epnum];
+	struct usb_ep *ep = &dep->endpoint;
 
-	if (data->xi0 == 0)
-	{
-		data->ep->maxpacket_limit = 1024;
-		data->ep->maxpacket = 1024;
+	if (epnum >= 2) {
+		ep->maxpacket_limit = 1024;
+		ep->maxpacket = 1024;
 	}
 
 	return 0;
@@ -154,15 +158,20 @@ static int exit_dwc3_gadget_pullup(struct kretprobe_instance *ri,
 }
 
 static int entry___dwc3_gadget_start(struct kretprobe_instance *ri,
-				struct pt_regs *regs)
+				   struct pt_regs *regs)
 {
 	struct dwc3 *dwc = (struct dwc3 *)regs->regs[0];
 
-	dwc3_msm_notify_event(dwc, DWC3_CONTROLLER_SOFT_RESET, 0);
+	/*
+	 * Setup USB GSI event buffer as controller soft reset has cleared
+	 * configured event buffer.
+	 */
+	dwc3_msm_notify_event(dwc, DWC3_GSI_EVT_BUF_SETUP, 0);
 
 	return 0;
 }
 
+#ifdef CONFIG_USB_DWC3_MSM_DEBUG
 static int entry_trace_dwc3_ctrl_req(struct kretprobe_instance *ri,
 				   struct pt_regs *regs)
 {
@@ -237,6 +246,7 @@ static int entry_trace_dwc3_event(struct kretprobe_instance *ri,
 
 	return 0;
 }
+#endif
 
 static int entry_dwc3_gadget_init_in_endpoint(struct kretprobe_instance *ri,
 				struct pt_regs *regs)
@@ -306,7 +316,7 @@ static struct kretprobe dwc3_msm_probes[] = {
 	ENTRY_EXIT(dwc3_gadget_conndone_interrupt),
 	ENTRY_EXIT(dwc3_gadget_pullup),
 	ENTRY(__dwc3_gadget_start),
-	ENTRY_EXIT(usb_ep_set_maxpacket_limit),
+#ifdef CONFIG_USB_DWC3_MSM_DEBUG
 	ENTRY(trace_dwc3_ctrl_req),
 	ENTRY(trace_dwc3_ep_queue),
 	ENTRY(trace_dwc3_ep_dequeue),
@@ -314,8 +324,8 @@ static struct kretprobe dwc3_msm_probes[] = {
 	ENTRY(trace_dwc3_gadget_ep_cmd),
 	ENTRY(trace_dwc3_prepare_trb),
 	ENTRY(trace_dwc3_event),
-	ENTRY_EXIT(dwc3_gadget_init_in_endpoint),
-	ENTRY_EXIT(dwc3_gadget_init_out_endpoint),
+#endif
+	ENTRY_EXIT(usb_ep_set_maxpacket_limit),
 };
 
 
@@ -326,10 +336,9 @@ int dwc3_msm_kretprobe_init(void)
 
 	for (i = 0; i < ARRAY_SIZE(dwc3_msm_probes) ; i++) {
 		ret = register_kretprobe(&dwc3_msm_probes[i]);
-		if (ret < 0) {
-			pr_err("register_kretprobe failed, returned %d\n", ret);
-			return ret;
-		}
+		if (ret < 0)
+			pr_err("register_kretprobe failed for %s, returned %d\n",
+					dwc3_msm_probes[i].kp.symbol_name, ret);
 	}
 
 	return 0;
