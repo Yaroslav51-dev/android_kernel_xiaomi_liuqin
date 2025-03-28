@@ -89,10 +89,6 @@ extern const uint16_t gesture_key_array[];
 #define BOOT_UPDATE_FIRMWARE 1
 #define BOOT_UPDATE_FIRMWARE_NAME "novatek_ts_fw.bin"
 
-//---ESD Protect.---
-#define NVT_TOUCH_ESD_PROTECT 0
-#define NVT_TOUCH_ESD_CHECK_PERIOD 1500	/* ms */
-
 enum trusted_touch_mode_config {
 	TRUSTED_TOUCH_VM_MODE,
 	TRUSTED_TOUCH_MODE_NONE
@@ -256,9 +252,6 @@ extern int32_t nvt_get_fw_info(void);
 extern int32_t nvt_clear_fw_status(void);
 extern int32_t nvt_check_fw_status(void);
 extern int32_t nvt_set_page(uint16_t i2c_addr, uint32_t addr);
-#if NVT_TOUCH_ESD_PROTECT
-extern void nvt_esd_check_enable(uint8_t enable);
-#endif /* #if NVT_TOUCH_ESD_PROTECT */
 extern void nvt_stop_crc_reboot(void);
 
 #else  /* NT36XXX_SPI */
