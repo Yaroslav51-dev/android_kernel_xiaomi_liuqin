@@ -1140,15 +1140,8 @@ export MODLIB
 # the default option --strip-debug will be used.  Otherwise,
 # INSTALL_MOD_STRIP value will be used as the options to the strip command.
 
-ifdef INSTALL_MOD_STRIP
-ifeq ($(INSTALL_MOD_STRIP),1)
-mod_strip_cmd = $(STRIP) --strip-debug
-else
-mod_strip_cmd = $(STRIP) $(INSTALL_MOD_STRIP)
-endif # INSTALL_MOD_STRIP=1
-else
-mod_strip_cmd = true
-endif # INSTALL_MOD_STRIP
+INSTALL_MOD_STRIP ?= 1  # Значение по умолчанию, если не задано
+mod_strip_cmd = $(if $(filter 1,$(INSTALL_MOD_STRIP)), $(STRIP) --strip-debug, true)
 export mod_strip_cmd
 
 # CONFIG_MODULE_COMPRESS, if defined, will cause module to be compressed
