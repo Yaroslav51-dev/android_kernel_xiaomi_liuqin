@@ -26,6 +26,8 @@
 #include <linux/of_irq.h>
 #include <uapi/linux/sched/types.h>
 #include "nt36xxx.h"
+#include <linux/kobject.h>
+#include <linux/sysfs.h>
 
 #if defined(CONFIG_FB)
 #include <linux/notifier.h>
@@ -2686,6 +2688,32 @@ Description:
 return:
 	Executive outcomes. 0---succeed. negative---failed
 *******************************************************/
+/* Sysfs interface functions */
+static ssize_t touch_game_mode_show(struct kobject *kobj,
+                                   struct kobj_attribute *attr,
+                                   char *buf)
+{
+    return scnprintf(buf, PAGE_SIZE, "SET_CUR_VALUE: %d\nGET_CUR_VALUE: %d\n",
+                   ts->touch_game_mode_set_cur, ts->touch_game_mode_get_cur);
+}
+
+static ssize_t touch_game_mode_store(struct kobject *kobj,
+                                   struct kobj_attribute *attr,
+                                   const char *buf, size_t count)
+{
+    int set_val, get_val;
+
+    if (sscanf(buf, "%d %d", &set_val, &get_val) == 2) {
+        ts->touch_game_mode_set_cur = set_val;
+        ts->touch_game_mode_get_cur = get_val;
+        return count;
+    }
+    return -EINVAL;
+}
+
+static struct kobj_attribute touch_game_mode_attr =
+    __ATTR(touch_game_mode, 0664, touch_game_mode_show, touch_game_mode_store);
+
 static int32_t nvt_ts_probe(struct spi_device *client)
 {
 	int32_t ret = 0;
@@ -2775,7 +2803,23 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	mutex_init(&ts->lock);
 	mutex_init(&ts->xbuf_lock);
+    /* Initialize touch mode values */
+    ts->touch_game_mode_set_cur = 1;
+    ts->touch_game_mode_get_cur = 1;
 
+    /* Create sysfs interface */
+    ts->touch_kobj = kobject_create_and_add("xiaomi_touch", kernel_kobj);
+    if (!ts->touch_kobj) {
+        NVT_ERR("failed to create kobject\n");
+        ret = -ENOMEM;
+        goto err_sysfs_init;
+    }
+
+    ret = sysfs_create_file(ts->touch_kobj, &touch_game_mode_attr.attr);
+    if (ret) {
+        NVT_ERR("failed to create sysfs file\n");
+        goto err_sysfs_file;
+    }
 	//---eng reset before TP_RESX high
 	nvt_eng_reset();
 
@@ -3143,7 +3187,11 @@ err_chipvertrim_failed:
 	mutex_destroy(&ts->xbuf_lock);
 	mutex_destroy(&ts->lock);
 	nvt_gpio_deconfig(ts);
+err_sysfs_file:
+    kobject_put(ts->touch_kobj);
+err_sysfs_init:
 err_gpio_config_failed:
+    mutex_destroy(&ts->lock);
 err_spi_setup:
 err_ckeck_full_duplex:
 	spi_set_drvdata(client, NULL);
@@ -3240,6 +3288,12 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 		input_unregister_device(ts->input_dev);
 		ts->input_dev = NULL;
 	}
+    /* Remove sysfs interface */
+    if (ts->touch_kobj) {
+        sysfs_remove_file(ts->touch_kobj, &touch_game_mode_attr.attr);
+        kobject_put(ts->touch_kobj);
+        ts->touch_kobj = NULL;
+    }
 
 	spi_set_drvdata(client, NULL);
 

@@ -241,6 +241,9 @@ struct nvt_ts_data {
 	struct pinctrl_state *pinctrl_state_suspend;
 	struct workqueue_struct *event_wq;
 	struct work_struct resume_work;
+    int touch_game_mode_set_cur;
+    int touch_game_mode_get_cur;
+    struct kobject *touch_kobj;
 };
 
 #if NVT_TOUCH_PROC
