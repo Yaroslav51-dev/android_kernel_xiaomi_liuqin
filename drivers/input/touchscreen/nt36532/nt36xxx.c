@@ -2397,7 +2397,6 @@ static int nvt_set_cur_value(int nvt_mode, int nvt_value)
 		nvt_set_gesture_mode();
 		return 0;
 	} else if (nvt_mode == Touch_Pen_ENABLE && ts && nvt_value >= 0) {
-#endif
 
 		switch_pen_input_device();
 		release_pen_event();
