@@ -3292,7 +3292,6 @@ static void nvt_ts_shutdown(struct spi_device *client)
 
 	if (ts->set_touchfeature_wq)
 		destroy_workqueue(ts->set_touchfeature_wq);
-#endif
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {
