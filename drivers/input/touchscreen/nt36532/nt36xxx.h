@@ -63,7 +63,7 @@
 #define INT_TRIGGER_TYPE IRQ_TYPE_EDGE_RISING
 
 //---bus transfer length---
-#define BUS_TRANSFER_LENGTH  256
+#define BUS_TRANSFER_LENGTH  512
 
 //---SPI driver info.---
 #define NVT_SPI_NAME "NVT-ts"
@@ -112,9 +112,9 @@ extern const uint16_t gesture_key_array[];
 #define MP_UPDATE_FIRMWARE_NAME   "novatek_nt36532_m82_mp_tm.bin"
 #define DEFAULT_DEBUG_FW_NAME     "novatek_debug_fw.bin"
 #define DEFAULT_DEBUG_MP_NAME     "novatek_debug_mp.bin"
-#define NVT_SUPER_RESOLUTION_N 10
+#define NVT_SUPER_RESOLUTION_N 12
 #if NVT_SUPER_RESOLUTION_N
-#define POINT_DATA_LEN 108
+#define POINT_DATA_LEN 144
 #else
 #define POINT_DATA_LEN 65
 #endif
