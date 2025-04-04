@@ -38,6 +38,14 @@
 #include <linux/input/tp_common.h>
 #endif
 
+#include <linux/sched.h>
+#include <linux/cpumask.h>
+#include <linux/workqueue.h>
+
+static const struct cpumask big_cpumask = {
+    .bits = { BIT(4) | BIT(5) | BIT(6) | BIT(7) }
+};
+
 #if NVT_TOUCH_EXT_PROC
 extern int32_t nvt_extra_proc_init(void);
 extern void nvt_extra_proc_deinit(void);
@@ -2930,8 +2938,21 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	if (client->irq) {
 		NVT_LOG("int_trigger_type=%d\n", ts->int_trigger_type);
 		ts->irq_enabled = true;
-		ret = request_threaded_irq(client->irq, NULL, nvt_ts_work_func,
-				ts->int_trigger_type | IRQF_ONESHOT, NVT_SPI_NAME, ts);
+        ret = request_threaded_irq(ts->client->irq, NULL, nvt_ts_work_func,
+                              ts->int_trigger_type | IRQF_ONESHOT | IRQF_NOBALANCING,
+                              NVT_SPI_NAME, ts);
+		if (!ret) {
+            cpumask_t perf_mask;
+            cpumask_clear(&perf_mask);
+            cpumask_set_cpu(4, &perf_mask);
+            cpumask_set_cpu(5, &perf_mask);
+            cpumask_set_cpu(6, &perf_mask);
+            cpumask_set_cpu(7, &perf_mask);
+    
+            irq_set_affinity_hint(ts->client->irq, &perf_mask);
+            NVT_LOG("IRQ %d bound to performance CPUs (4-7)\n", ts->client->irq);
+        }
+        
 		if (ret != 0) {
 			NVT_ERR("request irq failed. ret=%d\n", ret);
 			goto err_int_request_failed;
