@@ -1672,7 +1672,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
     ret = CTP_SPI_READ(ts->client, point_data, 
                       ts->pen_support ? (POINT_DATA_LEN + PEN_DATA_LEN + 1) : (POINT_DATA_LEN + 1));
 #endif
-    if (unlikely(ret < 0))) {
+    if (unlikely(ret < 0)) {
         NVT_ERR("SPI read error: %d", ret);
         goto xfer_error;
     }
