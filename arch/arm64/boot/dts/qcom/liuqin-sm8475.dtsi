@@ -154,9 +154,9 @@
 		novatek,mp-support-dt;
 
 		/*new touch faeature default param*/
-		novatek,touch-game-param-config1 = <2 2 1 2 1>;
-		novatek,touch-game-param-config2 = <2 2 2 2 1>;
-		novatek,touch-game-param-config3 = <2 2 3 2 1>;
+		novatek,touch-game-param-config1 = <0 0 0 0 0>;
+		novatek,touch-game-param-config2 = <0 0 0 0 0>;
+		novatek,touch-game-param-config3 = <0 0 0 0 0>;
 
 		novatek-mp-criteria-5973@0 {
 			#address-cells = <1>;
