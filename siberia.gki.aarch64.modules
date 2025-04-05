@@ -4,6 +4,7 @@
 
 MAKE_GOALS="${MAKE_GOALS}
 Image.lz4
+dtbs
 "
 
 ABI_DEFINITION=android/abi_gki_aarch64.xml
@@ -40,6 +41,8 @@ android/abi_gki_aarch64_tuxera
 
 FILES="${FILES}
 arch/arm64/boot/Image.lz4
+arch/arm64/boot/dts/qcom/*.dtb
+arch/arm64/boot/dts/qcom/*.dtbo
 "
 
 TRIM_NONLISTED_KMI=${TRIM_NONLISTED_KMI:-1}
