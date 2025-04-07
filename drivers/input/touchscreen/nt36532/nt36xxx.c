@@ -26,6 +26,7 @@
 #include <linux/of_irq.h>
 #include <uapi/linux/sched/types.h>
 #include "nt36xxx.h"
+#include <linux/devfreq_boost.h>
 
 #if defined(CONFIG_FB)
 #include <linux/notifier.h>
@@ -1672,9 +1673,9 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 		pm_wakeup_event(&ts->input_dev->dev, 5000);
 	}
 #endif
-
+	devfreq_boost_kick_max(DEVFREQ_MSM_LLCCBW, 100);
+	devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, 100);
 	mutex_lock(&ts->lock);
-
 	if (ts->dev_pm_suspend) {
 		ret = wait_for_completion_timeout(&ts->dev_pm_suspend_completion, msecs_to_jiffies(500));
 		if (!ret) {
