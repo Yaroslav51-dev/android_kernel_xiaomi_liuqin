@@ -153,15 +153,22 @@ return:
 static void nvt_irq_enable(bool enable)
 {
 	struct irq_desc *desc;
+	static cpumask_t perf_mask;
 
 	if (enable) {
+	    if (!cpumask_weight(&perf_mask)) {
+             cpumask_clear(&perf_mask);
+             cpumask_set_cpu(7, &perf_mask);
+        }
 		if (!ts->irq_enabled) {
 			enable_irq(ts->client->irq);
+			irq_set_affinity_hint(ts->client->irq, &perf_mask);
 			ts->irq_enabled = true;
 		}
 	} else {
 		if (ts->irq_enabled) {
 			disable_irq(ts->client->irq);
+			irq_set_affinity_hint(ts->client->irq, NULL);
 			ts->irq_enabled = false;
 		}
 	}
