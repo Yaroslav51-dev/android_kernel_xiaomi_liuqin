@@ -2951,13 +2951,10 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		if (!ret) {
             cpumask_t perf_mask;
             cpumask_clear(&perf_mask);
-            cpumask_set_cpu(4, &perf_mask);
-            cpumask_set_cpu(5, &perf_mask);
-            cpumask_set_cpu(6, &perf_mask);
             cpumask_set_cpu(7, &perf_mask);
     
             irq_set_affinity_hint(ts->client->irq, &perf_mask);
-            NVT_LOG("IRQ %d bound to performance CPUs (4-7)\n", ts->client->irq);
+            NVT_LOG("IRQ %d bound to performance CPUs (7)\n", ts->client->irq);
         }
         
 		if (ret != 0) {
