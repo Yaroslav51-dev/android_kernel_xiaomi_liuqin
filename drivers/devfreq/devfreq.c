@@ -393,7 +393,7 @@ static int devfreq_set_target(struct devfreq *devfreq, unsigned long new_freq,
  */
 int update_devfreq(struct devfreq *devfreq)
 {
-	unsigned long freq, min_freq, max_freq;
+	unsigned long freq, min_freq = 0, max_freq = 0;
 	int err = 0;
 	u32 flags = 0;
 
