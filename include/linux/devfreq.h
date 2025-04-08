@@ -185,8 +185,10 @@ struct devfreq {
 
 	void *data; /* private data for governors */
 
-	unsigned long min_freq;
-	unsigned long max_freq;
+	struct dev_pm_qos_request user_min_freq_req;
+	struct dev_pm_qos_request user_max_freq_req;
+	unsigned long scaling_min_freq;
+	unsigned long scaling_max_freq;
 	bool is_boost_device;
 	bool max_boost;
 	bool stop_polling;
