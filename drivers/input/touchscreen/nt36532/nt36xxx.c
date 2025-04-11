@@ -2943,14 +2943,12 @@ static int32_t nvt_ts_probe(struct spi_device *client)
     if (!touchpanel_kobj) {
         NVT_ERR("Failed to create touchpanel kobject\n");
         ret = -ENOMEM;
-        goto err_sysfs_fail; // Переход на метку очистки
     }
     
     /* Регистрируем атрибуты */
     if (sysfs_create_group(touchpanel_kobj, &touch_attr_group)) {
         NVT_ERR("Failed to create sysfs group\n");
-        ret = -ENOMEM;
-        goto err_sysfs_group_fail;
+        ret = -ENOMEM;;
     }
 
 	if (ts->pen_support) {
@@ -3251,12 +3249,6 @@ err_malloc_xbuf:
 		kfree(ts);
 		ts = NULL;
 	}
-err_kobject_put:
-    kobject_put(touchpanel_kobj);
-    touchpanel_kobj = NULL;
-    
-err_input_unregister:
-    input_unregister_device(ts->input_dev);
 	return ret;
 }
 
