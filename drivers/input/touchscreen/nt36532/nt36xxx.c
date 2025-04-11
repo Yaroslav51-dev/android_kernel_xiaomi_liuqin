@@ -42,6 +42,8 @@
 #include <linux/sched.h>
 #include <linux/cpumask.h>
 #include <linux/workqueue.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
 
 static const struct cpumask big_cpumask = {
     .bits = { BIT(4) | BIT(5) | BIT(6) | BIT(7) }
@@ -2702,6 +2704,45 @@ Description:
 return:
 	Executive outcomes. 0---succeed. negative---failed
 *******************************************************/
+
+static ssize_t game_mode_show(struct kobject *kobj, 
+                            struct kobj_attribute *attr,
+                            char *buf)
+{
+    return sprintf(buf, "%d\n", game_mode);
+}
+
+static ssize_t game_mode_store(struct kobject *kobj,
+                             struct kobj_attribute *attr,
+                             const char *buf, size_t count)
+{
+    int ret;
+    u8 val;
+
+    ret = kstrtou8(buf, 10, &val);
+    if (ret < 0 || val > 1) {
+        NVT_ERR("Invalid value! Only 0 or 1 allowed.\n");
+        return -EINVAL;
+    }
+
+    game_mode = val;
+    nvt_set_cur_value(Touch_Game_Mode, val);
+    return count;
+}
+
+static struct kobj_attribute game_mode_attr = __ATTR(game_mode, 0660, 
+                                                   game_mode_show, 
+                                                   game_mode_store);
+
+static struct attribute *touch_attrs[] = {
+    &game_mode_attr.attr,
+    NULL,
+};
+
+static struct attribute_group touch_attr_group = {
+    .attrs = touch_attrs,
+};
+
 static int32_t nvt_ts_probe(struct spi_device *client)
 {
 	int32_t ret = 0;
@@ -2888,6 +2929,19 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		NVT_ERR("register input device (%s) failed. ret=%d\n", ts->input_dev->name, ret);
 		goto err_input_register_device_failed;
 	}
+
+    touchpanel_kobj = kobject_create_and_add("touchpanel", NULL);
+    if (!touchpanel_kobj) {
+        NVT_ERR("Failed to create touchpanel kobject\n");
+        ret = -ENOMEM;
+        goto err_sysfs;
+    }
+
+    if (sysfs_create_group(touchpanel_kobj, &touch_attr_group)) {
+        NVT_ERR("Failed to create sysfs group\n");
+        ret = -ENOMEM;
+        goto err_sysfs_group;
+    }
 
 	if (ts->pen_support) {
 		//---allocate pen input device---
@@ -3620,7 +3674,13 @@ return:
 ********************************************************/
 static void __exit nvt_driver_exit(void)
 {
-	spi_unregister_driver(&nvt_spi_driver);
+    if (touchpanel_kobj) {
+        sysfs_remove_group(touchpanel_kobj, &touch_attr_group);
+        kobject_put(touchpanel_kobj);
+        touchpanel_kobj = NULL;
+    }
+
+    spi_unregister_driver(&nvt_spi_driver);
 }
 
 module_init(nvt_driver_init);
