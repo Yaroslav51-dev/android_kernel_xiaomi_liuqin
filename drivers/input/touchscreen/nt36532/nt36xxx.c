@@ -3251,13 +3251,12 @@ err_malloc_xbuf:
 		kfree(ts);
 		ts = NULL;
 	}
-err_sysfs_group:
+err_kobject_put:
     kobject_put(touchpanel_kobj);
     touchpanel_kobj = NULL;
-err_sysfs_kobj:
+    
+err_input_unregister:
     input_unregister_device(ts->input_dev);
-    spi_set_drvdata(client, NULL);
-    kfree(ts);
 	return ret;
 }
 
