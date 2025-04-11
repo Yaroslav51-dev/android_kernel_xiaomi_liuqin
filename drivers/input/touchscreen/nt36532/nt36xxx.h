@@ -241,8 +241,6 @@ struct nvt_ts_data {
 	struct pinctrl_state *pinctrl_state_suspend;
 	struct workqueue_struct *event_wq;
 	struct work_struct resume_work;
-	static struct kobject *touchpanel_kobj;
-    static u8 game_mode = 1;
 };
 
 #if NVT_TOUCH_PROC
@@ -307,3 +305,5 @@ int32_t nvt_write_addr(uint32_t addr, uint8_t data);
 bool nvt_get_dbgfw_status(void);
 int switch_pen_input_device(void);
 #endif /* _LINUX_NVT_TOUCH_H */
+extern struct kobject *touchpanel_kobj;
+extern u8 game_mode;

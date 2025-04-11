@@ -45,6 +45,10 @@
 #include <linux/sysfs.h>
 #include <linux/kobject.h>
 
+/* Добавить эти переменные */
+struct kobject *touchpanel_kobj = NULL;
+u8 game_mode = 0; // 0 - выключен, 1 - включен
+
 static const struct cpumask big_cpumask = {
     .bits = { BIT(4) | BIT(5) | BIT(6) | BIT(7) }
 };
@@ -2705,6 +2709,7 @@ return:
 	Executive outcomes. 0---succeed. negative---failed
 *******************************************************/
 
+/* Показывает текущее значение game_mode */
 static ssize_t game_mode_show(struct kobject *kobj, 
                             struct kobj_attribute *attr,
                             char *buf)
@@ -2712,6 +2717,7 @@ static ssize_t game_mode_show(struct kobject *kobj,
     return sprintf(buf, "%d\n", game_mode);
 }
 
+/* Устанавливает новое значение */
 static ssize_t game_mode_store(struct kobject *kobj,
                              struct kobj_attribute *attr,
                              const char *buf, size_t count)
@@ -2730,10 +2736,12 @@ static ssize_t game_mode_store(struct kobject *kobj,
     return count;
 }
 
+/* Объявляем атрибут */
 static struct kobj_attribute game_mode_attr = __ATTR(game_mode, 0660, 
                                                    game_mode_show, 
                                                    game_mode_store);
 
+/* Группа атрибутов */
 static struct attribute *touch_attrs[] = {
     &game_mode_attr.attr,
     NULL,
@@ -2930,17 +2938,19 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		goto err_input_register_device_failed;
 	}
 
+    /* Создаем каталог /sys/touchpanel/ */
     touchpanel_kobj = kobject_create_and_add("touchpanel", NULL);
     if (!touchpanel_kobj) {
         NVT_ERR("Failed to create touchpanel kobject\n");
         ret = -ENOMEM;
-        goto err_sysfs;
+        goto err_sysfs_fail; // Переход на метку очистки
     }
-
+    
+    /* Регистрируем атрибуты */
     if (sysfs_create_group(touchpanel_kobj, &touch_attr_group)) {
         NVT_ERR("Failed to create sysfs group\n");
         ret = -ENOMEM;
-        goto err_sysfs_group;
+        goto err_sysfs_group_fail;
     }
 
 	if (ts->pen_support) {
@@ -3241,6 +3251,13 @@ err_malloc_xbuf:
 		kfree(ts);
 		ts = NULL;
 	}
+err_sysfs_group:
+    kobject_put(touchpanel_kobj);
+    touchpanel_kobj = NULL;
+err_sysfs_kobj:
+    input_unregister_device(ts->input_dev);
+    spi_set_drvdata(client, NULL);
+    kfree(ts);
 	return ret;
 }
 
@@ -3674,6 +3691,7 @@ return:
 ********************************************************/
 static void __exit nvt_driver_exit(void)
 {
+    /* Удаляем sysfs интерфейс */
     if (touchpanel_kobj) {
         sysfs_remove_group(touchpanel_kobj, &touch_attr_group);
         kobject_put(touchpanel_kobj);
