@@ -1,3 +1,3 @@
-DEFCONFIG=gki_modules_defconfig
+DEFCONFIG=gki_defconfig
 # POST_DEFCONFIG_CMDS="check_defconfig"
 
