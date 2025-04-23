@@ -1396,7 +1396,6 @@ static int nvt_get_panel_type(struct nvt_ts_data *ts_data)
 	int i;
 	int j;
 	u8 *lockdown = ts_data->lockdown_info;
-	struct nvt_config_info *panel_list = ts->config_array;
 
 	for (j = 0; j < 60; j++) {
 		if (lockdown[1] == 0x42) {
