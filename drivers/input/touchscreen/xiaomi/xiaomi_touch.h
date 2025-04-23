@@ -100,15 +100,9 @@ enum MODE_TYPE {
 	Touch_Active_MODE = 1,
 	Touch_UP_THRESHOLD = 2,
 	Touch_Tolerance = 3,
-#ifdef CONFIG_TOUCHSCREEN_SUPPORT_NEW_GAME_MODE
 	Touch_Aim_Sensitivity = 4,
 	Touch_Tap_Stability = 5,
 	Touch_Expert_Mode = 6,
-#else
-	Touch_Wgh_Min = 4,
-	Touch_Wgh_Max = 5,
-	Touch_Wgh_Step = 6,
-#endif
 	Touch_Edge_Filter = 7,
 	Touch_Panel_Orientation = 8,
 	Touch_Report_Rate = 9,
