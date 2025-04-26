@@ -2932,6 +2932,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	if (client->irq) {
 		NVT_LOG("int_trigger_type=%d\n", ts->int_trigger_type);
 		ts->irq_enabled = true;
+		irq_set_irq_type(client->irq, IRQ_TYPE_EDGE_RISING);
 		ret = request_threaded_irq(client->irq, NULL, nvt_ts_work_func,
 				ts->int_trigger_type | IRQF_ONESHOT, NVT_SPI_NAME, ts);
 		if (ret != 0) {
