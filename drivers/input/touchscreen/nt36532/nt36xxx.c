@@ -2719,6 +2719,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 
 	ts->client = client;
 	ts->client->max_speed_hz = 19200000;
+	ts->client->mode |= SPI_3WIRE;
 	spi_set_drvdata(client, ts);
 
 	//---prepare for spi parameter---
