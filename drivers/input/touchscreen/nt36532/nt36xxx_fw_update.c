@@ -303,6 +303,18 @@ static void update_firmware_release(void)
 	fw_entry = NULL;
 }
 
+int touch_fw_override = 0;
+  char *touch_fw_name = "novatek_nt36532_m82_fw_csot.bin";
+  
+static void update_firmware_override(int choice) {
+  	switch (choice) {
+  		case 1:  touch_fw_name = "novatek_nt36532_m82_fw_csot.bin"; break;
+  		case 2:  touch_fw_name = "novatek_nt36532_m82_fw_tm.bin"; break;
+  		case 3:  touch_fw_name = "novatek_nt36532_m82_mp_csot.bin"; break;
+  		case 4:  touch_fw_name = "novatek_nt36532_m82_mp_tm.bin"; break;
+  	}
+}
+ 
 /*******************************************************
 Description:
 	Novatek touchscreen request update firmware function.
@@ -315,6 +327,11 @@ static int32_t update_firmware_request(const char *filename)
 	uint8_t retry = 0;
 	int32_t ret = 0;
 
+	if (touch_fw_override) {
+  		update_firmware_override(touch_fw_override);
+  		filename = touch_fw_name;
+  	}
+  	
 	if (NULL == filename) {
 		return -ENOENT;
 	}

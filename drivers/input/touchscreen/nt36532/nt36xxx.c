@@ -3601,6 +3601,8 @@ static void __exit nvt_driver_exit(void)
 	spi_unregister_driver(&nvt_spi_driver);
 }
 
+module_param_named(touch_fw_override, touch_fw_override, int, 0664);
+
 module_init(nvt_driver_init);
 module_exit(nvt_driver_exit);
 
