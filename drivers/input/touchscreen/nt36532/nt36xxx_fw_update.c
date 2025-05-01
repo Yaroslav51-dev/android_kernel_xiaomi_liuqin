@@ -18,6 +18,7 @@
 
 #include <linux/firmware.h>
 #include <linux/gpio.h>
+#include <linux/moduleparam.h>
 
 #include "nt36xxx.h"
 
@@ -294,6 +295,29 @@ Description:
 return:
 	n.a.
 *******************************************************/
+static int param_set_uint(const char *val, const struct kernel_param *kp)
+{
+    unsigned int num;
+    int ret;
+
+    ret = kstrtouint(val, 0, &num);
+    if (ret < 0)
+        return ret;
+
+    *((unsigned int *)kp->arg) = num;
+    return 0;
+}
+
+static int param_get_uint(char *buffer, const struct kernel_param *kp)
+{
+    return scnprintf(buffer, PAGE_SIZE, "%u\n", *((unsigned int *)kp->arg));
+}
+
+const struct kernel_param_ops param_ops_uint = {
+    .set = param_set_uint,
+    .get = param_get_uint,
+}
+
 static void update_firmware_release(void)
 {
 	if (fw_entry) {
@@ -314,7 +338,7 @@ static void update_firmware_override(int choice) {
   		case 4:  touch_fw_name = "novatek_nt36532_m82_mp_tm.bin"; break;
   	}
 }
- 
+module_param_cb(touch_fw_override, &param_ops_uint, &touch_fw_override, 0664);
 /*******************************************************
 Description:
 	Novatek touchscreen request update firmware function.
