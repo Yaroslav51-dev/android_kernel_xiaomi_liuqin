@@ -21,7 +21,7 @@ fw-external-y := $(subst $(quote),,$(CONFIG_EXTRA_FIRMWARE))
 # accurate. In the latter case it doesn't matter -- it'll use $(fw-shipped-all).
 # But be aware that the config file might not be included at all.
 fw-shipped-$(CONFIG_INPUT_PRESS_NDT) += ndt_fw.bin
-fw-shipped-$(CONFIG_TOUCHSCREEN_NT36532_HOSTDL_SPI) += novatek_nt36532_m82_fw_csot.bin novatek_nt36532_m82_mp_csot.bin novatek_nt36532_m82_fw_tm.bin novatek_nt36532_m82_mp_tm.bin
+fw-shipped-$(CONFIG_TOUCHSCREEN_NT36532_HOSTDL_SPI_FW) += novatek_nt36532_m82_fw_csot.bin novatek_nt36532_m82_mp_csot.bin novatek_nt36532_m82_fw_tm.bin novatek_nt36532_m82_mp_tm.bin
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 
