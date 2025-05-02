@@ -117,7 +117,7 @@ extern const uint16_t gesture_key_array[];
 #define POINT_DATA_CHECKSUM 1
 #define POINT_DATA_CHECKSUM_LEN 65
 
-extern int touch_fw_override;
+extern unsigned int touch_fw_override;
 
 #define NVT_TOUCH_WDT_RECOVERY 1
 
