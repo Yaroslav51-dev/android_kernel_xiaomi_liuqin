@@ -316,7 +316,7 @@ static int param_get_uint(char *buffer, const struct kernel_param *kp)
 const struct kernel_param_ops param_ops_uint = {
     .set = param_set_uint,
     .get = param_get_uint,
-}
+};
 
 static void update_firmware_release(void)
 {
@@ -325,7 +325,7 @@ static void update_firmware_release(void)
 	}
 
 	fw_entry = NULL;
-};
+}
 
 unsigned int touch_fw_override = 0;
   char *touch_fw_name = "novatek_nt36532_m82_fw_csot.bin";
