@@ -325,9 +325,9 @@ static void update_firmware_release(void)
 	}
 
 	fw_entry = NULL;
-}
+};
 
-int touch_fw_override = 0;
+unsigned int touch_fw_override = 0;
   char *touch_fw_name = "novatek_nt36532_m82_fw_csot.bin";
   
 static void update_firmware_override(int choice) {
