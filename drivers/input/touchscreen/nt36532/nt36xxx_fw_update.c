@@ -295,29 +295,6 @@ Description:
 return:
 	n.a.
 *******************************************************/
-static int param_set_uint(const char *val, const struct kernel_param *kp)
-{
-    unsigned int num;
-    int ret;
-
-    ret = kstrtouint(val, 0, &num);
-    if (ret < 0)
-        return ret;
-
-    *((unsigned int *)kp->arg) = num;
-    return 0;
-}
-
-static int param_get_uint(char *buffer, const struct kernel_param *kp)
-{
-    return scnprintf(buffer, PAGE_SIZE, "%u\n", *((unsigned int *)kp->arg));
-}
-
-const struct kernel_param_ops param_ops_uint = {
-    .set = param_set_uint,
-    .get = param_get_uint,
-};
-
 static void update_firmware_release(void)
 {
 	if (fw_entry) {
