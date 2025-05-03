@@ -119,6 +119,8 @@ msm_video-objs += driver/variant/ar50lt/src/msm_vidc_buffer_ar50lt.o \
                   driver/variant/ar50lt/src/msm_vidc_ar50lt.o
 endif
 
+obj-y +=msm/
+
 msm_video-objs += driver/vidc/src/msm_vidc_v4l2.o \
                   driver/vidc/src/msm_vidc_vb2.o \
                   driver/vidc/src/msm_vidc.o \
