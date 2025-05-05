@@ -30,7 +30,9 @@
 #include <linux/earlysuspend.h>
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 #include "../xiaomi/xiaomi_touch.h"
+#endif
 
 #include "nt36xxx_mem_map.h"
 
@@ -47,7 +49,7 @@
 #include <linux/platform_data/spi-mt65xx.h>
 #endif
 
-#define NVT_DEBUG 0
+#define NVT_DEBUG 1
 
 //---GPIO number---
 #define NVTTOUCH_RST_PIN 980
@@ -58,8 +60,8 @@
 #define PINCTRL_STATE_SUSPEND		"pmx_ts_suspend"
 
 //---INT trigger mode---
-#define IRQ_TYPE_EDGE_RISING 1
-#define IRQ_TYPE_EDGE_FALLING 2
+//#define IRQ_TYPE_EDGE_RISING 1
+//#define IRQ_TYPE_EDGE_FALLING 2
 #define INT_TRIGGER_TYPE IRQ_TYPE_EDGE_RISING
 
 //---bus transfer length---
@@ -68,8 +70,12 @@
 //---SPI driver info.---
 #define NVT_SPI_NAME "NVT-ts"
 
-#define NVT_LOG(fmt, args...) ((void)0)
-#define NVT_ERR(fmt, args...) ((void)0)
+#if NVT_DEBUG
+#define NVT_LOG(fmt, args...)    pr_err("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
+#else
+#define NVT_LOG(fmt, args...)    pr_info("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
+#endif
+#define NVT_ERR(fmt, args...)    pr_err("[%s] %s %d: " fmt, NVT_SPI_NAME, __func__, __LINE__, ##args)
 
 //---Input device info.---
 #define NVT_TS_NAME "NVTCapacitiveTouchScreen"
@@ -83,7 +89,7 @@
 #if TOUCH_KEY_NUM > 0
 extern const uint16_t touch_key_array[TOUCH_KEY_NUM];
 #endif
-#define TOUCH_FORCE_NUM 30
+#define TOUCH_FORCE_NUM 1000
 //---for Pen---
 #define PEN_PRESSURE_MAX (4095)
 #define PEN_DISTANCE_MAX (1)
@@ -117,8 +123,9 @@ extern const uint16_t gesture_key_array[];
 #define POINT_DATA_CHECKSUM 1
 #define POINT_DATA_CHECKSUM_LEN 65
 
-extern unsigned int touch_fw_override;
-
+//---ESD Protect.---
+#define NVT_TOUCH_ESD_PROTECT 0
+#define NVT_TOUCH_ESD_CHECK_PERIOD 1500	/* ms */
 #define NVT_TOUCH_WDT_RECOVERY 1
 
 #define CHECK_PEN_DATA_CHECKSUM 0
@@ -156,6 +163,10 @@ struct nvt_ts_data {
 	struct input_dev *input_dev;
 	struct delayed_work nvt_fwu_work;
 	struct delayed_work nvt_lockdown_work;
+	struct mutex power_supply_lock;
+	struct work_struct power_supply_work;
+	struct notifier_block power_supply_notifier;
+	int is_usb_exist;
 	int db_wakeup;
 #if defined(NVT_PEN_CONNECT_STRATEGY)
 	struct work_struct pen_charge_state_change_work;
@@ -164,6 +175,8 @@ struct nvt_ts_data {
 	bool pen_charge_connect;
 	bool game_mode_enable;
 	struct device *dev;
+	int pen_count;
+	bool pen_shield_flag;
 #endif
 	struct mutex pen_switch_lock;
 	int ic_state;
@@ -195,9 +208,11 @@ struct nvt_ts_data {
 	uint8_t max_touch_num;
 	uint8_t max_button_num;
 	uint32_t int_trigger_type;
+#ifdef CONFIG_TOUCHSCREEN_XIAOMI_TOUCHFEATURE
 	u32 gamemode_config[3][5];
 	struct workqueue_struct *set_touchfeature_wq;
 	struct work_struct set_touchfeature_work;
+#endif
 	int32_t irq_gpio;
 	uint32_t irq_flags;
 	int32_t reset_gpio;
@@ -301,5 +316,8 @@ int32_t nvt_set_page(uint32_t addr);
 int32_t nvt_wait_auto_copy(void);
 int32_t nvt_write_addr(uint32_t addr, uint8_t data);
 bool nvt_get_dbgfw_status(void);
+#if NVT_TOUCH_ESD_PROTECT
+extern void nvt_esd_check_enable(uint8_t enable);
+#endif /* #if NVT_TOUCH_ESD_PROTECT */
 int switch_pen_input_device(void);
 #endif /* _LINUX_NVT_TOUCH_H */
