@@ -2618,7 +2618,7 @@ static int nvt_power_supply_event(struct notifier_block *nb,
 	struct nvt_ts_data *ts =
 	    container_of(nb, struct nvt_ts_data, power_supply_notifier);
 
-	if (ts && &ts->power_supply_work != NULL && ts->event_wq != NULL)
+	if (ts && ts->event_wq != NULL)
 		queue_work(ts->event_wq, &ts->power_supply_work);
 
 	return 0;
@@ -3235,11 +3235,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	mutex_init(&ts->pen_switch_lock);
 	INIT_WORK(&ts->pen_charge_state_change_work, nvt_pen_charge_state_change_work);
 	ts->pen_charge_state_notifier.notifier_call = nvt_pen_charge_state_notifier_callback;
-	ret = pen_charge_state_notifier_register_client(&ts->pen_charge_state_notifier);
-	if(ret) {
-		NVT_ERR("register pen charge state change notifier failed. ret=%d\n", ret);
-		goto err_register_pen_charge_state_failed;
-	}
 
 #endif
 
@@ -3327,11 +3322,6 @@ err_register_fb_notif_failed:
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 	unregister_early_suspend(&ts->early_suspend);
 err_register_early_suspend_failed:
-#endif
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
-		NVT_ERR("Error occurred while unregistering pen charge state notifier.\n");
-err_register_pen_charge_state_failed:
 #endif
 	mutex_destroy(&ts->pen_switch_lock);
 	destroy_workqueue(ts->set_touchfeature_wq);
@@ -3460,10 +3450,6 @@ static int32_t nvt_ts_remove(struct spi_device *client)
 	nvt_flash_proc_deinit();
 #endif
 
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-	if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
-		NVT_ERR("Error occurred while unregistering pen status switch state notifier.\n");
-#endif
 	mutex_destroy(&ts->pen_switch_lock);
 	mutex_destroy(&ts->power_supply_lock);
 	destroy_workqueue(ts->event_wq);
@@ -3563,11 +3549,6 @@ static void nvt_ts_shutdown(struct spi_device *client)
 #if NVT_TOUCH_PROC
 	nvt_flash_proc_deinit();
 #endif
-
-#if defined(NVT_PEN_CONNECT_STRATEGY)
-	if (pen_charge_state_notifier_unregister_client(&ts->pen_charge_state_notifier))
-		NVT_ERR("Error occurred while unregistering pen status switch state notifier.\n");
-#endif
 	mutex_destroy(&ts->pen_switch_lock);
 	mutex_destroy(&ts->power_supply_lock);
 	destroy_workqueue(ts->event_wq);
@@ -3575,7 +3556,6 @@ static void nvt_ts_shutdown(struct spi_device *client)
 
 	if (ts->set_touchfeature_wq)
 		destroy_workqueue(ts->set_touchfeature_wq);
-#endif
 
 #if BOOT_UPDATE_FIRMWARE
 	if (nvt_fwu_wq) {

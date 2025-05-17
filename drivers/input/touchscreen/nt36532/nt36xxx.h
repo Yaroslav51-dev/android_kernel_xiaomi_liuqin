@@ -46,7 +46,7 @@
 #ifdef CONFIG_SPI_MT65XX
 #include <linux/platform_data/spi-mt65xx.h>
 #endif
-
+#define NVT_TOUCH_ESD_PROTECT 0
 #define NVT_DEBUG 0
 
 //---GPIO number---
