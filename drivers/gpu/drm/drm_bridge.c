@@ -527,18 +527,18 @@ void drm_bridge_chain_pre_enable(struct drm_bridge *bridge)
 
 	encoder = bridge->encoder;
 	list_for_each_entry_reverse(iter, &encoder->bridge_chain, chain_node) {
-    	if (bridge->is_dsi_drm_bridge)
-    		mutex_lock(&bridge->lock);
-    		
-    	if (bridge->is_dsi_drm_bridge)
-    		mutex_unlock(&bridge->lock);
-
     	if (bridge->funcs->pre_enable)
     		bridge->funcs->pre_enable(bridge);
     	
 		if (iter == bridge)
 			break;
 	}
+	
+	if (bridge->is_dsi_drm_bridge)
+    	mutex_lock(&bridge->lock);
+    		
+    if (bridge->is_dsi_drm_bridge)
+    	mutex_unlock(&bridge->lock);
 }
 EXPORT_SYMBOL(drm_bridge_chain_pre_enable);
 
