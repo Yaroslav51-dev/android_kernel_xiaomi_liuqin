@@ -474,8 +474,6 @@ void drm_bridge_chain_post_disable(struct drm_bridge *bridge)
     	if (bridge->is_dsi_drm_bridge)
     		mutex_unlock(&bridge->lock);
 	}
-
-	drm_bridge_post_disable(bridge->next);
 }
 EXPORT_SYMBOL(drm_bridge_chain_post_disable);
 
@@ -531,13 +529,13 @@ void drm_bridge_chain_pre_enable(struct drm_bridge *bridge)
 	list_for_each_entry_reverse(iter, &encoder->bridge_chain, chain_node) {
     	if (bridge->is_dsi_drm_bridge)
     		mutex_lock(&bridge->lock);
-    
-    	if (bridge->funcs->pre_enable)
-    		bridge->funcs->pre_enable(bridge);
     		
     	if (bridge->is_dsi_drm_bridge)
     		mutex_unlock(&bridge->lock);
 
+    	if (bridge->funcs->pre_enable)
+    		bridge->funcs->pre_enable(bridge);
+    	
 		if (iter == bridge)
 			break;
 	}
