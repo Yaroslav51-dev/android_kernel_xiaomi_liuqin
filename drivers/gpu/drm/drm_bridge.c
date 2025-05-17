@@ -527,9 +527,8 @@ void drm_bridge_chain_pre_enable(struct drm_bridge *bridge)
 
 	encoder = bridge->encoder;
 	list_for_each_entry_reverse(iter, &encoder->bridge_chain, chain_node) {
-    	if (bridge->funcs->pre_enable)
-    		bridge->funcs->pre_enable(bridge);
-    	
+		if (iter->funcs->pre_enable)
+			iter->funcs->pre_enable(iter);
 		if (iter == bridge)
 			break;
 	}
