@@ -839,12 +839,11 @@ static int32_t nvt_xiaomi_lockdown_info_open(struct inode *inode, struct file *f
 	return single_open(file, nvt_xiaomi_lockdown_info_show, NULL);
 }
 
-static const struct file_operations nvt_xiaomi_lockdown_info_fops = {
-	.owner = THIS_MODULE,
-	.open = nvt_xiaomi_lockdown_info_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
+static const struct proc_ops nvt_xiaomi_lockdown_info_fops = {
+    .proc_open = nvt_xiaomi_lockdown_info_open,    // .open → .proc_open
+    .proc_read = seq_read,                         // .read → .proc_read
+    .proc_lseek = seq_lseek,                       // .llseek → .proc_lseek
+    .proc_release = single_release,                // .release → .proc_release
 };
 
 /*******************************************************
@@ -899,13 +898,13 @@ int32_t nvt_extra_proc_init(void)
 		}
 	}
 
-	NVT_proc_xiaomi_lockdown_info_entry = proc_create(NVT_XIAOMI_LOCKDOWN_INFO, 0444, NULL, &nvt_xiaomi_lockdown_info_fops);
-	if (NVT_proc_xiaomi_lockdown_info_entry == NULL) {
-		NVT_ERR("create proc/%s Failed!\n", NVT_XIAOMI_LOCKDOWN_INFO);
-		return -ENOMEM;
-	} else {
-		NVT_LOG("create proc/%s Succeeded!\n", NVT_XIAOMI_LOCKDOWN_INFO);
-	}
+    NVT_proc_xiaomi_lockdown_info_entry = proc_create(NVT_XIAOMI_LOCKDOWN_INFO, 0444, NULL, &nvt_xiaomi_lockdown_info_fops);
+    if (NVT_proc_xiaomi_lockdown_info_entry == NULL) {
+        NVT_ERR("create proc/%s Failed!\n", NVT_XIAOMI_LOCKDOWN_INFO);
+        return -ENOMEM;
+    } else {
+        NVT_LOG("create proc/%s Succeeded!\n", NVT_XIAOMI_LOCKDOWN_INFO);
+    }
 
 	return 0;
 }
