@@ -3954,11 +3954,6 @@ static int32_t __init nvt_driver_init(void)
 
 	NVT_LOG("start\n");
 
-	if (nvt_off_charger_mode()) {
-		NVT_LOG("off_charger states, %s exit", __func__);
-		return 0;
-	}
-
 	//---add spi driver---
 	ret = spi_register_driver(&nvt_spi_driver);
 	if (ret) {
