@@ -2866,42 +2866,6 @@ Description:
 return:
 	Executive outcomes. 0---succeed. negative---failed
 *******************************************************/
-int xiaomitouch_register_modedata(struct xiaomi_touch_interface *data)
-{
-	int ret = 0;
-	struct xiaomi_touch_interface *touch_data = NULL;
-
-	if (!touch_pdata)
-		ret = -ENOMEM;
-
-	touch_data = touch_pdata->touch_data;
-	MI_TOUCH_LOGI(1, "%s %s: \n", MI_TAG, __func__);
-
-	mutex_lock(&xiaomi_touch_dev.mutex);
-
-	touch_data->setModeValue = data->setModeValue;
-	touch_data->getModeValue = data->getModeValue;
-	touch_data->resetMode = data->resetMode;
-	touch_data->getModeAll = data->getModeAll;
-	touch_data->palm_sensor_read = data->palm_sensor_read;
-	touch_data->palm_sensor_write = data->palm_sensor_write;
-	touch_data->p_sensor_read = data->p_sensor_read;
-	touch_data->p_sensor_write = data->p_sensor_write;
-	touch_data->panel_vendor_read = data->panel_vendor_read;
-	touch_data->panel_color_read = data->panel_color_read;
-	touch_data->panel_display_read = data->panel_display_read;
-	touch_data->touch_vendor_read = data->touch_vendor_read;
-	touch_data->setModeLongValue = data->setModeLongValue;
-	touch_data->get_touch_super_resolution_factor = data->get_touch_super_resolution_factor;
-#if XIAOMI_ROI
-	touch_data->partial_diff_data_read = data->partial_diff_data_read;
-#endif
-
-	mutex_unlock(&xiaomi_touch_dev.mutex);
-
-	return ret;
-}
-
 static int32_t nvt_ts_probe(struct spi_device *client)
 {
 	int32_t ret = 0;
@@ -3314,7 +3278,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	xiaomi_touch_interfaces.resetMode = nvt_reset_mode;
 	xiaomi_touch_interfaces.getModeAll = nvt_get_mode_all;
 	nvt_init_touchmode_data();
-	xiaomitouch_register_modedata(&xiaomi_touch_interfaces);
 
 #ifdef CONFIG_TOUCHSCREEN_NVT_DEBUG_FS
 	ts->debugfs = debugfs_create_dir("tp_debug", NULL);
@@ -3977,13 +3940,6 @@ static struct spi_driver nvt_spi_driver = {
 #endif
 	},
 };
-
-static bool nvt_off_charger_mode(void)
-{
-	bool charger_mode = false;
-	char charger_node[8] = {'\0'};
-	return charger_mode;
-}
 
 /*******************************************************
 Description:
