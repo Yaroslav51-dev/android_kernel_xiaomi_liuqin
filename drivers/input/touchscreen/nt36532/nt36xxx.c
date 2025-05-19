@@ -81,11 +81,7 @@ static void release_touch_event(void);
 static void release_pen_event(void);
 static void nvt_all_para_recovery(void);
 
-extern int dsi_panel_lockdown_info_read(unsigned char *plockdowninfo);
-extern void dsi_panel_doubleclick_enable(bool on);
 extern void touch_irq_boost(void);
-extern void lpm_disable_for_dev(bool on, char event_dev);
-
 uint32_t ENG_RST_ADDR  = 0x7FFF80;
 uint32_t SPI_RD_FAST_ADDR = 0;	//read from dtsi
 
@@ -1163,6 +1159,7 @@ void nvt_ts_pen_gesture_report(uint8_t pen_gesture_id)
 }
 #endif
 
+
 int switch_pen_input_device(void) {
 	uint8_t buf[8] = {0};
 	int32_t ret = 0;
@@ -1706,7 +1703,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 #endif
 
 	touch_irq_boost();
-	lpm_disable_for_dev(true, 0x1);
 
 	mutex_lock(&ts->lock);
 
@@ -1787,7 +1783,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 			nvt_ts_pen_gesture_report(pen_format_id);
 		}
 		mutex_unlock(&ts->lock);
-		lpm_disable_for_dev(false, 0x1);
 		return IRQ_HANDLED;
 	}
 #endif
@@ -1959,7 +1954,6 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 XFER_ERROR:
 
 	mutex_unlock(&ts->lock);
-	lpm_disable_for_dev(false, 0x1);
 	return IRQ_HANDLED;
 }
 
@@ -2354,8 +2348,6 @@ static void nvt_set_gesture_mode(void)
 		ts->gesture_command_delayed = ts->db_wakeup;
 		NVT_LOG("Panel off, don't set dbclick gesture flag util panel on");
 		ts->db_wakeup = 0;
-	} else  if (ts->ic_state >= NVT_IC_RESUME_IN){
-		dsi_panel_doubleclick_enable(!!ts->db_wakeup);
 	}
 }
 
@@ -2405,7 +2397,6 @@ static int nvt_set_cur_value(int nvt_mode, int nvt_value)
 
 		}
 		ts->db_wakeup = ts->db_wakeup & 0xFD; /* close off screen short hand by defalut */
-		dsi_panel_doubleclick_enable(!!ts->db_wakeup);
 		NVT_LOG("nvt_value is 0x%02X, pen status is %s, pen id is %d, pen_bluetooth_connect is %d, pen_count is %d, db_wakeup is 0x%02X",
 					nvt_value, (nvt_value >> 4) ? "connect":"disconnct", nvt_value & 0x0F, ts->pen_bluetooth_connect, ts->pen_count, ts->db_wakeup);
 
@@ -2547,7 +2538,6 @@ static u8 nvt_panel_vendor_read(void)
 	if (ts->lkdown_readed) {
 		value = ts->lockdown_info[0];
 	} else {
-		ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
 		if (ret <= 0) {
 			NVT_ERR("can't get lockdown info");
 			return value;
@@ -2576,7 +2566,6 @@ static u8 nvt_panel_display_read(void)
 	if (ts->lkdown_readed) {
 		value = ts->lockdown_info[1];
 	} else {
-		ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
 		if (ret <= 0) {
 			NVT_ERR("can't get lockdown info");
 			return value;
@@ -2663,7 +2652,6 @@ static void get_lockdown_info(struct work_struct *work)
 	NVT_LOG("lkdown_readed = %d", ts->lkdown_readed);
 
 	if (!ts->lkdown_readed) {
-		ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
 		if (ret < 0) {
 			NVT_ERR("can't get lockdown info");
 		} else {
@@ -2878,6 +2866,42 @@ Description:
 return:
 	Executive outcomes. 0---succeed. negative---failed
 *******************************************************/
+int xiaomitouch_register_modedata(struct xiaomi_touch_interface *data)
+{
+	int ret = 0;
+	struct xiaomi_touch_interface *touch_data = NULL;
+
+	if (!touch_pdata)
+		ret = -ENOMEM;
+
+	touch_data = touch_pdata->touch_data;
+	MI_TOUCH_LOGI(1, "%s %s: \n", MI_TAG, __func__);
+
+	mutex_lock(&xiaomi_touch_dev.mutex);
+
+	touch_data->setModeValue = data->setModeValue;
+	touch_data->getModeValue = data->getModeValue;
+	touch_data->resetMode = data->resetMode;
+	touch_data->getModeAll = data->getModeAll;
+	touch_data->palm_sensor_read = data->palm_sensor_read;
+	touch_data->palm_sensor_write = data->palm_sensor_write;
+	touch_data->p_sensor_read = data->p_sensor_read;
+	touch_data->p_sensor_write = data->p_sensor_write;
+	touch_data->panel_vendor_read = data->panel_vendor_read;
+	touch_data->panel_color_read = data->panel_color_read;
+	touch_data->panel_display_read = data->panel_display_read;
+	touch_data->touch_vendor_read = data->touch_vendor_read;
+	touch_data->setModeLongValue = data->setModeLongValue;
+	touch_data->get_touch_super_resolution_factor = data->get_touch_super_resolution_factor;
+#if XIAOMI_ROI
+	touch_data->partial_diff_data_read = data->partial_diff_data_read;
+#endif
+
+	mutex_unlock(&xiaomi_touch_dev.mutex);
+
+	return ret;
+}
+
 static int32_t nvt_ts_probe(struct spi_device *client)
 {
 	int32_t ret = 0;
@@ -3759,7 +3783,6 @@ static int32_t nvt_ts_resume(struct device *dev)
 	ts->is_usb_exist = -1;
 	queue_work(ts->event_wq, &ts->power_supply_work);
 
-	dsi_panel_doubleclick_enable(!!ts->db_wakeup);/*if true, dbclick work until next suspend*/
 	if (likely(ts->ic_state == NVT_IC_RESUME_IN)) {
 		ts->ic_state = NVT_IC_RESUME_OUT;
 	} else {
@@ -3769,7 +3792,6 @@ static int32_t nvt_ts_resume(struct device *dev)
 		ts->db_wakeup = ts->gesture_command_delayed;
 		ts->gesture_command_delayed = -1;
 		NVT_LOG("execute delayed command, set double click wakeup %d\n", ts->db_wakeup);
-		dsi_panel_doubleclick_enable(!!ts->db_wakeup);
 	}
 
 	NVT_LOG("reload the game mode cmd");
@@ -3960,16 +3982,6 @@ static bool nvt_off_charger_mode(void)
 {
 	bool charger_mode = false;
 	char charger_node[8] = {'\0'};
-	char *chose = (char *) strnstr(saved_command_line,
-				"androidboot.mode=", strlen(saved_command_line));
-	if (chose) {
-		memcpy(charger_node, (chose + strlen("androidboot.mode=")),
-			sizeof(charger_node) - 1);
-		NVT_LOG("%s: charger_node is %s\n", __func__, charger_node);
-		if (!strncmp(charger_node, "charger", strlen("charger"))) {
-			charger_mode = true;
-		}
-	}
 	return charger_mode;
 }
 
