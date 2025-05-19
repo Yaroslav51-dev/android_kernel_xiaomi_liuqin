@@ -49,7 +49,6 @@ static struct proc_dir_entry *NVT_proc_raw_entry;
 static struct proc_dir_entry *NVT_proc_diff_entry;
 static struct proc_dir_entry *NVT_proc_pen_diff_entry;
 static struct proc_dir_entry *NVT_proc_xiaomi_lockdown_info_entry;
-extern int dsi_panel_lockdown_info_read(unsigned char *plockdowninfo);
 
 /*******************************************************
 Description:
@@ -821,7 +820,6 @@ static int nvt_xiaomi_lockdown_info_show(struct seq_file *m, void *v)
 {
 	int ret;
 
-	ret = dsi_panel_lockdown_info_read(ts->lockdown_info);
 	if (ret < 0) {
 		NVT_ERR("can't get lockdown info");
 	} else {
