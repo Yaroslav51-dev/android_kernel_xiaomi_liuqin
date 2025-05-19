@@ -801,7 +801,9 @@
   power_supply_get_by_name
   power_supply_get_property
   power_supply_put
+  power_supply_reg_notifier
   power_supply_set_property
+  power_supply_unreg_notifier
   prandom_u32
   preempt_schedule
   preempt_schedule_notrace
@@ -1283,10 +1285,6 @@
   thermal_zone_device_enable
   thermal_zone_device_register
   thermal_zone_device_unregister
-
-# required by bcl_soc.ko
-  power_supply_reg_notifier
-  power_supply_unreg_notifier
 
 # required by binder_prio.ko
   __traceiter_android_vh_binder_priority_skip
@@ -1947,6 +1945,11 @@
   kmsg_dump_unregister
   ktime_get_coarse_real_ts64
   param_ops_string
+
+# required by nt36532_touch.ko
+  mi_drm_register_client
+  mi_drm_unregister_client
+  power_supply_is_system_supplied
 
 # required by pci-msm-drv.ko
   crc8
