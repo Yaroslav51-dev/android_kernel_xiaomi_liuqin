@@ -818,7 +818,7 @@ static const struct file_operations nvt_pen_diff_fops = {
 
 static int nvt_xiaomi_lockdown_info_show(struct seq_file *m, void *v)
 {
-	int ret;
+	int ret = 0;
 
 	if (ret < 0) {
 		NVT_ERR("can't get lockdown info");
