@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2021-2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define pr_fmt(fmt)	"eusb2_phy: %s: " fmt, __func__
@@ -227,11 +227,19 @@ static void msm_eusb2_phy_clocks(struct msm_eusb2_phy *phy, bool on)
 
 static void msm_eusb2_phy_update_eud_detect(struct msm_eusb2_phy *phy, bool set)
 {
-	if (set)
+	if (!phy->eud_detect_reg)
+		return;
+
+	if (set) {
+		/* Make sure all the writes are processed before setting EUD_DETECT */
+		mb();
 		writel_relaxed(EUD_DETECT, phy->eud_detect_reg);
-	else
+	} else {
 		writel_relaxed(readl_relaxed(phy->eud_detect_reg) & ~EUD_DETECT,
 					phy->eud_detect_reg);
+		/* Make sure clearing EUD_DETECT is completed before turning off the regulators */
+		mb();
+	}
 }
 
 static int msm_eusb2_phy_power(struct msm_eusb2_phy *phy, bool on)
@@ -288,8 +296,6 @@ static int msm_eusb2_phy_power(struct msm_eusb2_phy *phy, bool on)
 		goto unset_vdda12;
 	}
 
-	/* Make sure all the writes are processed before setting EUD_DETECT */
-	mb();
 	/* Set eud_detect_reg after powering on eUSB PHY rails to bring EUD out of reset */
 	msm_eusb2_phy_update_eud_detect(phy, true);
 
@@ -300,9 +306,6 @@ static int msm_eusb2_phy_power(struct msm_eusb2_phy *phy, bool on)
 clear_eud_det:
 	/* Clear eud_detect_reg to put EUD in reset */
 	msm_eusb2_phy_update_eud_detect(phy, false);
-
-	/* Make sure clearing EUD_DETECT is completed before turning off the regulators */
-	mb();
 
 	ret = regulator_disable(phy->vdda12);
 	if (ret)
@@ -720,6 +723,8 @@ static int msm_eusb2_phy_init(struct usb_phy *uphy)
 
 	msm_eusb2_write_readback(phy->base, USB_PHY_UTMI_CTRL5, POR, POR);
 
+	udelay(10);
+
 	msm_eusb2_write_readback(phy->base, USB_PHY_HS_PHY_CTRL_COMMON0,
 			PHY_ENABLE | RETENABLEN, PHY_ENABLE | RETENABLEN);
 
@@ -803,7 +808,8 @@ static int msm_eusb2_phy_set_suspend(struct usb_phy *uphy, int suspend)
 			 * suspend case. As this vote is suppressible, this will allow XO
 			 * shutdown.
 			 */
-			if (phy->ref_clk && !phy->ref_clk_enable) {
+			if (phy->ref_clk && !phy->ref_clk_enable &&
+					!(phy->ur->flags & UR_AUTO_RESUME_SUPPORTED)) {
 				phy->ref_clk_enable = true;
 				clk_prepare_enable(phy->ref_clk);
 			}
@@ -819,10 +825,11 @@ static int msm_eusb2_phy_set_suspend(struct usb_phy *uphy, int suspend)
 		}
 
 		/* With EUD spoof disconnect, keep clk and ldos on */
-		if (phy->phy.flags & EUD_SPOOF_DISCONNECT)
+		if ((phy->phy.flags & EUD_SPOOF_DISCONNECT) || is_eud_debug_mode_active(phy))
 			goto suspend_exit;
 
-		if (phy->ref_clk && phy->ref_clk_enable) {
+		if (phy->ref_clk && phy->ref_clk_enable &&
+					!(phy->ur->flags & UR_AUTO_RESUME_SUPPORTED)) {
 			clk_disable_unprepare(phy->ref_clk);
 			phy->ref_clk_enable = false;
 		}
@@ -981,17 +988,13 @@ static int msm_eusb2_phy_probe(struct platform_device *pdev)
 	}
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "eud_detect_reg");
-	if (!res) {
-		dev_err(dev, "missing eud_detect register address\n");
-		ret = -ENODEV;
-		goto err_ret;
-	}
-
-	phy->eud_detect_reg = devm_ioremap_resource(dev, res);
-	if (IS_ERR(phy->eud_detect_reg)) {
-		dev_err(dev, "eud_detect_reg ioremap err:%d\n", phy->eud_detect_reg);
-		ret = PTR_ERR(phy->eud_detect_reg);
-		goto err_ret;
+	if (res) {
+		phy->eud_detect_reg = devm_ioremap_resource(dev, res);
+		if (IS_ERR(phy->eud_detect_reg)) {
+			dev_err(dev, "eud_detect_reg ioremap err:%d\n", phy->eud_detect_reg);
+			ret = PTR_ERR(phy->eud_detect_reg);
+			goto err_ret;
+		}
 	}
 
 	phy->ref_clk_src = devm_clk_get(dev, "ref_clk_src");

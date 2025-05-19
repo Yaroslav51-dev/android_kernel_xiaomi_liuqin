@@ -91,7 +91,8 @@ static inline struct anon_vma *anon_vma_alloc(void)
 	anon_vma = kmem_cache_alloc(anon_vma_cachep, GFP_KERNEL);
 	if (anon_vma) {
 		atomic_set(&anon_vma->refcount, 1);
-		anon_vma->degree = 1;	/* Reference for first vma */
+		anon_vma->num_children = 0;
+		anon_vma->num_active_vmas = 0;
 		anon_vma->parent = anon_vma;
 		/*
 		 * Initialise the anon_vma root to point to itself. If called
@@ -199,6 +200,7 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 		anon_vma = anon_vma_alloc();
 		if (unlikely(!anon_vma))
 			goto out_enomem_free_avc;
+		anon_vma->num_children++; /* self-parent link for new root */
 		allocated = anon_vma;
 	}
 
@@ -208,8 +210,7 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 	if (likely(!vma->anon_vma)) {
 		vma->anon_vma = anon_vma;
 		anon_vma_chain_link(vma, avc, anon_vma);
-		/* vma reference or self-parent link for new root */
-		anon_vma->degree++;
+		anon_vma->num_active_vmas++;
 		allocated = NULL;
 		avc = NULL;
 	}
@@ -294,19 +295,19 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
 		anon_vma_chain_link(dst, avc, anon_vma);
 
 		/*
-		 * Reuse existing anon_vma if its degree lower than two,
-		 * that means it has no vma and only one anon_vma child.
+		 * Reuse existing anon_vma if it has no vma and only one
+		 * anon_vma child.
 		 *
-		 * Do not chose parent anon_vma, otherwise first child
-		 * will always reuse it. Root anon_vma is never reused:
+		 * Root anon_vma is never reused:
 		 * it has self-parent reference and at least one child.
 		 */
 		if (!dst->anon_vma && src->anon_vma &&
-		    anon_vma != src->anon_vma && anon_vma->degree < 2)
+		    anon_vma->num_children < 2 &&
+		    anon_vma->num_active_vmas == 0)
 			dst->anon_vma = anon_vma;
 	}
 	if (dst->anon_vma)
-		dst->anon_vma->degree++;
+		dst->anon_vma->num_active_vmas++;
 	unlock_anon_vma_root(root);
 	return 0;
 
@@ -356,6 +357,7 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 	anon_vma = anon_vma_alloc();
 	if (!anon_vma)
 		goto out_error;
+	anon_vma->num_active_vmas++;
 	avc = anon_vma_chain_alloc(GFP_KERNEL);
 	if (!avc)
 		goto out_error_free_anon_vma;
@@ -376,7 +378,7 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 	vma->anon_vma = anon_vma;
 	anon_vma_lock_write(anon_vma);
 	anon_vma_chain_link(vma, avc, anon_vma);
-	anon_vma->parent->degree++;
+	anon_vma->parent->num_children++;
 	anon_vma_unlock_write(anon_vma);
 
 	return 0;
@@ -408,7 +410,7 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 		 * to free them outside the lock.
 		 */
 		if (RB_EMPTY_ROOT(&anon_vma->rb_root.rb_root)) {
-			anon_vma->parent->degree--;
+			anon_vma->parent->num_children--;
 			continue;
 		}
 
@@ -416,7 +418,8 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 		anon_vma_chain_free(avc);
 	}
 	if (vma->anon_vma)
-		vma->anon_vma->degree--;
+		vma->anon_vma->num_active_vmas--;
+
 	unlock_anon_vma_root(root);
 
 	/*
@@ -427,7 +430,8 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 	list_for_each_entry_safe(avc, next, &vma->anon_vma_chain, same_vma) {
 		struct anon_vma *anon_vma = avc->anon_vma;
 
-		VM_WARN_ON(anon_vma->degree);
+		VM_WARN_ON(anon_vma->num_children);
+		VM_WARN_ON(anon_vma->num_active_vmas);
 		put_anon_vma(anon_vma);
 
 		list_del(&avc->same_vma);
@@ -527,6 +531,7 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page,
 	struct anon_vma *anon_vma = NULL;
 	struct anon_vma *root_anon_vma;
 	unsigned long anon_mapping;
+	bool success = false;
 
 	rcu_read_lock();
 	anon_mapping = (unsigned long)READ_ONCE(page->mapping);
@@ -547,6 +552,17 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page,
 			up_read(&root_anon_vma->rwsem);
 			anon_vma = NULL;
 		}
+		goto out;
+	}
+	trace_android_vh_do_page_trylock(page, NULL, NULL, &success);
+	if (success) {
+		anon_vma = NULL;
+		goto out;
+	}
+
+	if (rwc && rwc->try_lock) {
+		anon_vma = NULL;
+		rwc->contended = true;
 		goto out;
 	}
 
@@ -792,6 +808,7 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 		}
 
 		if (pvmw.pte) {
+			trace_android_vh_look_around(&pvmw, page, vma, &referenced);
 			if (ptep_clear_flush_young_notify(vma, address,
 						pvmw.pte)) {
 				/*
@@ -827,6 +844,7 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 		pra->vm_flags |= vma->vm_flags;
 	}
 
+	trace_android_vh_page_referenced_one_end(vma, page, referenced);
 	if (!pra->mapcount)
 		return false; /* To break the loop */
 
@@ -903,6 +921,7 @@ int page_referenced(struct page *page,
 
 	return rwc.contended ? -1 : pra.referenced;
 }
+EXPORT_SYMBOL_GPL(page_referenced);
 
 static bool page_mkclean_one(struct page *page, struct vm_area_struct *vma,
 			    unsigned long address, void *arg)
@@ -1123,6 +1142,7 @@ void do_page_add_anon_rmap(struct page *page,
 {
 	bool compound = flags & RMAP_COMPOUND;
 	bool first;
+	bool success = false;
 
 	if (unlikely(PageKsm(page)))
 		lock_page_memcg(page);
@@ -1136,7 +1156,10 @@ void do_page_add_anon_rmap(struct page *page,
 		mapcount = compound_mapcount_ptr(page);
 		first = atomic_inc_and_test(mapcount);
 	} else {
-		first = atomic_inc_and_test(&page->_mapcount);
+		trace_android_vh_update_page_mapcount(page, true, compound,
+							&first, &success);
+		if (!success)
+			first = atomic_inc_and_test(&page->_mapcount);
 	}
 
 	if (first) {
@@ -1210,13 +1233,22 @@ void __page_add_new_anon_rmap(struct page *page,
 void page_add_file_rmap(struct page *page, bool compound)
 {
 	int i, nr = 1;
+	bool first_mapping;
+	bool success = false;
 
 	VM_BUG_ON_PAGE(compound && !PageTransHuge(page), page);
 	lock_page_memcg(page);
 	if (compound && PageTransHuge(page)) {
 		for (i = 0, nr = 0; i < thp_nr_pages(page); i++) {
-			if (atomic_inc_and_test(&page[i]._mapcount))
-				nr++;
+			trace_android_vh_update_page_mapcount(&page[i], true,
+					compound, &first_mapping, &success);
+			if ((success)) {
+				if (first_mapping)
+					nr++;
+			} else {
+				if (atomic_inc_and_test(&page[i]._mapcount))
+					nr++;
+			}
 		}
 		if (!atomic_inc_and_test(compound_mapcount_ptr(page)))
 			goto out;
@@ -1232,8 +1264,15 @@ void page_add_file_rmap(struct page *page, bool compound)
 			if (PageMlocked(page))
 				clear_page_mlock(compound_head(page));
 		}
-		if (!atomic_inc_and_test(&page->_mapcount))
-			goto out;
+		trace_android_vh_update_page_mapcount(page, true,
+					compound, &first_mapping, &success);
+		if (success) {
+			if (!first_mapping)
+				goto out;
+		} else {
+			if (!atomic_inc_and_test(&page->_mapcount))
+				goto out;
+		}
 	}
 	__mod_lruvec_page_state(page, NR_FILE_MAPPED, nr);
 out:
@@ -1243,6 +1282,8 @@ out:
 static void page_remove_file_rmap(struct page *page, bool compound)
 {
 	int i, nr = 1;
+	bool first_mapping;
+	bool success = false;
 
 	VM_BUG_ON_PAGE(compound && !PageHead(page), page);
 
@@ -1256,8 +1297,15 @@ static void page_remove_file_rmap(struct page *page, bool compound)
 	/* page still mapped by someone else? */
 	if (compound && PageTransHuge(page)) {
 		for (i = 0, nr = 0; i < thp_nr_pages(page); i++) {
-			if (atomic_add_negative(-1, &page[i]._mapcount))
-				nr++;
+			trace_android_vh_update_page_mapcount(&page[i], false,
+						compound, &first_mapping, &success);
+			if (success) {
+				if (first_mapping)
+					nr++;
+			} else {
+				if (atomic_add_negative(-1, &page[i]._mapcount))
+					nr++;
+			}
 		}
 		if (!atomic_add_negative(-1, compound_mapcount_ptr(page)))
 			return;
@@ -1266,8 +1314,15 @@ static void page_remove_file_rmap(struct page *page, bool compound)
 		else
 			__dec_node_page_state(page, NR_FILE_PMDMAPPED);
 	} else {
-		if (!atomic_add_negative(-1, &page->_mapcount))
-			return;
+		trace_android_vh_update_page_mapcount(page, false,
+					compound, &first_mapping, &success);
+		if (success) {
+			if (!first_mapping)
+				return;
+		} else {
+			if (!atomic_add_negative(-1, &page->_mapcount))
+				return;
+		}
 	}
 
 	/*
@@ -1284,6 +1339,8 @@ static void page_remove_file_rmap(struct page *page, bool compound)
 static void page_remove_anon_compound_rmap(struct page *page)
 {
 	int i, nr;
+	bool first_mapping;
+	bool success = false;
 
 	if (!atomic_add_negative(-1, compound_mapcount_ptr(page)))
 		return;
@@ -1303,8 +1360,15 @@ static void page_remove_anon_compound_rmap(struct page *page)
 		 * them are still mapped.
 		 */
 		for (i = 0, nr = 0; i < thp_nr_pages(page); i++) {
-			if (atomic_add_negative(-1, &page[i]._mapcount))
-				nr++;
+			trace_android_vh_update_page_mapcount(&page[i], false,
+					false, &first_mapping, &success);
+			if (success) {
+				if (first_mapping)
+					nr++;
+			} else {
+				if (atomic_add_negative(-1, &page[i]._mapcount))
+					nr++;
+			}
 		}
 
 		/*
@@ -1334,6 +1398,8 @@ static void page_remove_anon_compound_rmap(struct page *page)
  */
 void page_remove_rmap(struct page *page, bool compound)
 {
+	bool first_mapping;
+	bool success = false;
 	lock_page_memcg(page);
 
 	if (!PageAnon(page)) {
@@ -1346,10 +1412,16 @@ void page_remove_rmap(struct page *page, bool compound)
 		goto out;
 	}
 
-	/* page still mapped by someone else? */
-	if (!atomic_add_negative(-1, &page->_mapcount))
-		goto out;
-
+	trace_android_vh_update_page_mapcount(page, false,
+					compound, &first_mapping, &success);
+	if (success) {
+		if (!first_mapping)
+			goto out;
+	} else {
+		/* page still mapped by someone else? */
+		if (!atomic_add_negative(-1, &page->_mapcount))
+			goto out;
+	}
 	/*
 	 * We use the irq-unsafe __{inc|mod}_zone_page_stat because
 	 * these counters are not modified in interrupt context, and
@@ -1652,7 +1724,30 @@ static bool try_to_unmap_one(struct page *page, struct vm_area_struct *vma,
 
 			/* MADV_FREE page check */
 			if (!PageSwapBacked(page)) {
-				if (!PageDirty(page)) {
+				int ref_count, map_count;
+
+				/*
+				 * Synchronize with gup_pte_range():
+				 * - clear PTE; barrier; read refcount
+				 * - inc refcount; barrier; read PTE
+				 */
+				smp_mb();
+
+				ref_count = page_ref_count(page);
+				map_count = page_mapcount(page);
+
+				/*
+				 * Order reads for page refcount and dirty flag
+				 * (see comments in __remove_mapping()).
+				 */
+				smp_rmb();
+
+				/*
+				 * The only page refs must be one from isolation
+				 * plus the rmap(s) (dropped by discard:).
+				 */
+				if (ref_count == 1 + map_count &&
+				    !PageDirty(page)) {
 					/* Invalidate as we cleared the pte */
 					mmu_notifier_invalidate_range(mm,
 						address, address + PAGE_SIZE);
@@ -1925,6 +2020,7 @@ static void rmap_walk_file(struct page *page, struct rmap_walk_control *rwc,
 	struct address_space *mapping = page_mapping(page);
 	pgoff_t pgoff_start, pgoff_end;
 	struct vm_area_struct *vma;
+	bool got_lock = false, success = false;
 
 	/*
 	 * The page lock not only makes sure that page->mapping cannot
@@ -1939,7 +2035,6 @@ static void rmap_walk_file(struct page *page, struct rmap_walk_control *rwc,
 
 	pgoff_start = page_to_pgoff(page);
 	pgoff_end = pgoff_start + thp_nr_pages(page) - 1;
-
 	if (!locked) {
 		trace_android_vh_do_page_trylock(page,
 					&mapping->i_mmap_rwsem, &got_lock, &success);

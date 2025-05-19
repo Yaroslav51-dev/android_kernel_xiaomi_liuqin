@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _LINUX_MSM_GENI_SE
@@ -24,11 +25,13 @@ enum se_protocol_types {
 	SPI,
 	UART,
 	I2C,
-	I3C
+	I3C,
+	SPI_SLAVE
 };
 
 /**
- * struct geni_se_rsc - GENI Serial Engine Resource
+ * struct se_geni_rsc - GENI Serial Engine Resource
+ * @base:		Base Address of the Serial Engine's register block
  * @ctrl_dev		Pointer to controller device.
  * @wrapper_dev:	Pointer to the parent QUPv3 core.
  * @se_clk:		Handle to the core serial engine clock.
@@ -51,9 +54,10 @@ enum se_protocol_types {
  * @num_clk_levels:	Number of valid clock levels in clk_perf_tbl.
  * @clk_perf_tbl:	Table of clock frequency input to Serial Engine clock.
  * @proto:		Protocol configured for this serial engine
- * @is_list_add:	To synchronize list add and del.
+ * @is_list_add;	To synchronize list add and del.
  */
 struct se_geni_rsc {
+	void __iomem *base;
 	struct device *ctrl_dev;
 	struct device *wrapper_dev;
 	struct clk *se_clk;
@@ -88,6 +92,7 @@ struct se_geni_rsc {
 /* Common SE registers */
 #define GENI_INIT_CFG_REVISION		(0x0)
 #define GENI_S_INIT_CFG_REVISION	(0x4)
+#define SE_GENI_GENERAL_CFG             (0x10)
 #define GENI_FORCE_DEFAULT_REG		(0x20)
 #define GENI_OUTPUT_CTRL		(0x24)
 #define GENI_CGC_CTRL			(0x28)
@@ -99,17 +104,37 @@ struct se_geni_rsc {
 #define GENI_FW_REVISION_RO		(0x68)
 #define GENI_FW_S_REVISION_RO		(0x6C)
 #define SE_GENI_CLK_SEL			(0x7C)
+#define SE_GENI_CFG_SEQ_START		(0x84)
+#define SE_DMA_IF_EN			(0x004)
+#define SE_GENI_CFG_REG			(0x200)
+#define SE_UART_LOOPBACK_CFG            (0x22C)
+#define SE_GENI_CFG_REG80		(0x240)
+#define SE_UART_IO_MACRO_CTRL           (0x240)
+#define SE_UART_IO3_VAL                 (0x248)
 #define SE_GENI_BYTE_GRAN		(0x254)
 #define SE_GENI_DMA_MODE_EN		(0x258)
+#define SE_UART_TX_TRANS_CFG            (0x25C)
 #define SE_GENI_TX_PACKING_CFG0		(0x260)
 #define SE_GENI_TX_PACKING_CFG1		(0x264)
+#define SE_UART_TX_WORD_LEN             (0x268)
+#define SE_UART_TX_STOP_BIT_LEN         (0x26C)
+#define SE_UART_TX_TRANS_LEN            (0x270)
+#define SE_UART_RX_TRANS_CFG            (0x280)
 #define SE_GENI_RX_PACKING_CFG0		(0x284)
 #define SE_GENI_RX_PACKING_CFG1		(0x288)
+#define SE_UART_RX_WORD_LEN             (0x28C)
+#define SE_UART_RX_STALE_CNT            (0x294)
+#define SE_UART_TX_PARITY_CFG           (0x2A4)
+#define SE_UART_RX_PARITY_CFG           (0x2A8)
+#define SE_UART_MANUAL_RFR              (0x2AC)
 #define SE_GENI_M_CMD0			(0x600)
 #define SE_GENI_M_CMD_CTRL_REG		(0x604)
 #define SE_GENI_M_IRQ_STATUS		(0x610)
 #define SE_GENI_M_IRQ_EN		(0x614)
+#define M_IRQ_ENABLE                    (0x614)
 #define SE_GENI_M_IRQ_CLEAR		(0x618)
+#define M_CMD_ERR_STATUS                (0x624)
+#define M_FW_ERR_STATUS                 (0x628)
 #define SE_GENI_S_CMD0			(0x630)
 #define SE_GENI_S_CMD_CTRL_REG		(0x634)
 #define SE_GENI_S_IRQ_STATUS		(0x640)
@@ -129,12 +154,30 @@ struct se_geni_rsc {
 #define SE_IRQ_EN			(0xE1C)
 #define SE_HW_PARAM_0			(0xE24)
 #define SE_HW_PARAM_1			(0xE28)
+#define SE_HW_PARAM_2			(0xE2C)
 #define SE_DMA_GENERAL_CFG		(0xE30)
 #define SE_DMA_DEBUG_REG0		(0xE40)
+#define SE_GENI_CLK_CTRL                (0x2000)
+#define SE_FIFO_IF_DISABLE              (0x2008)
+#define SLAVE_MODE_EN			(BIT(3))
+#define START_TRIGGER			(BIT(0))
 #define QUPV3_HW_VER			(0x4)
 
 /* GENI_OUTPUT_CTRL fields */
 #define DEFAULT_IO_OUTPUT_CTRL_MSK	(GENMASK(6, 0))
+#define GENI_IO_MUX_0_EN		BIT(0)
+#define GENI_IO_MUX_1_EN		BIT(1)
+
+/* GENI_CFG_REG80 fields */
+#define IO1_SEL_TX			BIT(2)
+#define IO2_DATA_IN_SEL_PAD2		(GENMASK(11, 10))
+#define IO3_DATA_IN_SEL_PAD2		BIT(15)
+#define OTHER_IO_OE			BIT(12)
+#define IO2_DATA_IN_SEL		BIT(11)
+#define RX_DATA_IN_SEL			BIT(8)
+#define IO_MACRO_IO3_SEL		(GENMASK(7, 6))
+#define IO_MACRO_IO2_SEL		BIT(5)
+#define IO_MACRO_IO0_SEL		BIT(0)
 
 /* GENI_FORCE_DEFAULT_REG fields */
 #define FORCE_DEFAULT	(BIT(0))
@@ -282,15 +325,28 @@ struct se_geni_rsc {
 /* SE_HW_PARAM_0 fields */
 #define TX_FIFO_WIDTH_MSK	(GENMASK(29, 24))
 #define TX_FIFO_WIDTH_SHFT	(24)
-#define TX_FIFO_DEPTH_MSK	(GENMASK(21, 16))
-#define TX_FIFO_DEPTH_SHFT	(16)
-#define GEN_I3C_IBI_CTRL	(BIT(7))
+/*
+ * For QUP HW Version >= 3.10 Tx fifo depth support is increased
+ * to 256bytes and corresponding bits are 16 to 23
+ */
+#define TX_FIFO_DEPTH_MSK_256_BYTES	(GENMASK(23, 16))
+#define TX_FIFO_DEPTH_MSK		(GENMASK(21, 16))
+#define TX_FIFO_DEPTH_SHFT		(16)
+#define GEN_I3C_IBI_CTRL		(BIT(7))
 
 /* SE_HW_PARAM_1 fields */
 #define RX_FIFO_WIDTH_MSK	(GENMASK(29, 24))
 #define RX_FIFO_WIDTH_SHFT	(24)
-#define RX_FIFO_DEPTH_MSK	(GENMASK(21, 16))
-#define RX_FIFO_DEPTH_SHFT	(16)
+/*
+ * For QUP HW Version >= 3.10 Rx fifo depth support is increased
+ * to 256bytes and corresponding bits are 16 to 23
+ */
+#define RX_FIFO_DEPTH_MSK_256_BYTES	(GENMASK(23, 16))
+#define RX_FIFO_DEPTH_MSK		(GENMASK(21, 16))
+#define RX_FIFO_DEPTH_SHFT		(16)
+
+/* SE_HW_PARAM_2 fields */
+#define GEN_HW_FSM_I2C		(BIT(15))
 
 /* SE_DMA_GENERAL_CFG */
 #define DMA_RX_CLK_CGC_ON	(BIT(0))
@@ -348,7 +404,6 @@ struct se_geni_rsc {
 #define RX_FLUSH_DONE		(BIT(4))
 #define RX_GENI_GP_IRQ		(GENMASK(12, 5))
 #define RX_GENI_CANCEL_IRQ	(BIT(14))
-#define RX_GENI_GP_IRQ_EXT	(GENMASK(13, 12))
 #define RX_GENI_CMD_FAILURE	(BIT(15))
 #define DMA_RX_ERROR_STATUS (RX_SBE | RX_GENI_CANCEL_IRQ | RX_GENI_CMD_FAILURE)
 
@@ -389,14 +444,40 @@ if (print) { \
 } while (0)
 
 /* In KHz */
-#define DEFAULT_SE_CLK  19200
-#define I2C_CORE2X_VOTE	19200
-#define I3C_CORE2X_VOTE	19200
-#define SPI_CORE2X_VOTE	100000
-#define UART_CORE2X_VOTE	100000
+#define DEFAULT_SE_CLK			19200
+#define I2C_CORE2X_VOTE			19200
+#define I3C_CORE2X_VOTE			19200
+#define SPI_CORE2X_VOTE			50000
+#define UART_CORE2X_VOTE		100000
 #define UART_CONSOLE_CORE2X_VOTE	19200
 
 #if IS_ENABLED(CONFIG_MSM_GENI_SE)
+
+/**
+ * test_bus_select_per_qupv3() - Function to select the test bus
+ * @wrapper_dev:	Handle to QUPV3 wrapper node
+ * @test_bus_num:	Test bus number to select
+ *
+ * Return:	None
+ */
+void test_bus_select_per_qupv3(struct device *wrapper_dev, u8 test_bus_num);
+
+/**
+ * test_bus_enable_per_qupv3() - Function to enable test bus
+ * @wrapper_dev:        Handle to QUPV3 wrapper node
+ *
+ * Return:      None
+ */
+void test_bus_enable_per_qupv3(struct device *wrapper_dev);
+
+/**
+ * test_bus_read_per_qupv3() - Observe the value in QUPV3_TEST_BUS_REG
+ * @wrapper_dev:        Handle to QUPV3 wrapper node
+ *
+ * Return:	None
+ */
+void test_bus_read_per_qupv3(struct device *wrapper_dev);
+
 /**
  * geni_read_reg_nolog() - Helper function to read from a GENI register
  * @base:	Base address of the serial engine's register block.
@@ -539,14 +620,14 @@ void geni_abort_s_cmd(void __iomem *base);
 
 /**
  * get_tx_fifo_depth() - Get the TX fifo depth of the serial engine
- * @base:	Base address of the serial engine's register block.
+ * @se: Pointer to the concerned serial engine.
  *
  * This function is used to get the depth i.e. number of elements in the
  * TX fifo of the serial engine.
  *
  * Return:	TX fifo depth in units of FIFO words.
  */
-int get_tx_fifo_depth(void __iomem *base);
+int get_tx_fifo_depth(struct se_geni_rsc *se);
 
 /**
  * get_tx_fifo_width() - Get the TX fifo width of the serial engine
@@ -561,14 +642,14 @@ int get_tx_fifo_width(void __iomem *base);
 
 /**
  * get_rx_fifo_depth() - Get the RX fifo depth of the serial engine
- * @base:	Base address of the serial engine's register block.
+ * @se: Pointer to the concerned serial engine.
  *
  * This function is used to get the depth i.e. number of elements in the
  * RX fifo of the serial engine.
  *
  * Return:	RX fifo depth in units of FIFO words.
  */
-int get_rx_fifo_depth(void __iomem *base);
+int get_rx_fifo_depth(struct se_geni_rsc *se);
 
 /**
  * se_get_packing_config() - Get the packing configuration based on input

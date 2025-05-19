@@ -796,7 +796,7 @@ void qcom_sys_heap_reserve_pool_init(const char *name, struct qcom_system_heap *
 	}
 }
 
-static is_server_app(struct dynamic_page_pool **reserve_pools) {
+static int is_server_app(struct dynamic_page_pool **reserve_pools) {
 	get_task_struct(current);
 	if (reserve_pools != NULL && current->signal->oom_score_adj == NATIVE_ADJ) {
 		int j;

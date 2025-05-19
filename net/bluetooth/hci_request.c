@@ -107,8 +107,10 @@ static void hci_req_sync_complete(struct hci_dev *hdev, u8 result, u16 opcode,
 	if (hdev->req_status == HCI_REQ_PEND) {
 		hdev->req_result = result;
 		hdev->req_status = HCI_REQ_DONE;
-		if (skb)
+		if (skb) {
+			kfree_skb(hdev->req_skb);
 			hdev->req_skb = skb_get(skb);
+		}
 		wake_up_interruptible(&hdev->req_wait_q);
 	}
 }
@@ -795,6 +797,10 @@ static u8 update_white_list(struct hci_request *req)
 	 * offloading, we can update this to also check for those conditions.
 	 */
 	bool allow_rpa = hdev->suspended;
+
+	if (use_ll_privacy(hdev) &&
+	    hci_dev_test_flag(hdev, HCI_ENABLE_LL_PRIVACY))
+		allow_rpa = true;
 
 	/* Go through the current white list programmed into the
 	 * controller one by one and check if that address is still
@@ -2111,7 +2117,7 @@ int __hci_req_enable_ext_advertising(struct hci_request *req, u8 instance)
 	/* Set duration per instance since controller is responsible for
 	 * scheduling it.
 	 */
-	if (adv_instance && adv_instance->duration) {
+	if (adv_instance && adv_instance->timeout) {
 		u16 duration = adv_instance->timeout * MSEC_PER_SEC;
 
 		/* Time = N * 10 ms */

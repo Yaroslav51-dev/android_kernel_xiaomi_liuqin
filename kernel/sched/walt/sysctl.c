@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include "walt.h"
@@ -69,10 +70,30 @@ unsigned int sysctl_sched_suppress_region2;
 unsigned int sysctl_sched_skip_sp_newly_idle_lb = 1;
 unsigned int sysctl_sched_hyst_min_coloc_ns = 80000000;
 unsigned int sysctl_sched_asymcap_boost;
-
+static int sysctl_sched_sibling_cluster_map[4] = {-1, -1, -1, -1};
 /* range is [1 .. INT_MAX] */
 static int sysctl_task_read_pid = 1;
 
+static int sched_sibling_cluster_handler(struct ctl_table *table, int write,
+				       void __user *buffer, size_t *lenp,
+				       loff_t *ppos)
+{
+	int ret = -EACCES, i = 0;
+	static bool done;
+	struct walt_sched_cluster *cluster;
+
+	if (write && done)
+		return ret;
+
+	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	if (!ret && write) {
+		done = true;
+		for_each_sched_cluster(cluster)
+			cluster->sibling_cluster = sysctl_sched_sibling_cluster_map[i++];
+	}
+
+	return ret;
+}
 static int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
 				       void __user *buffer, size_t *lenp,
 				       loff_t *ppos)
@@ -899,13 +920,13 @@ struct ctl_table walt_table[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 	{
-		.procname	= "sched_asymcap_booster",
-		.data		= &sysctl_sched_asymcap_boost,
-		.maxlen		= sizeof(unsigned int),
+		.procname	= "sched_sibling_cluster",
+		.data		= &sysctl_sched_sibling_cluster_map,
+		.maxlen		= sizeof(int) * 4,
 		.mode		= 0644,
-		.proc_handler	= proc_douintvec_minmax,
-		.extra1		= SYSCTL_ZERO,
-		.extra2		= SYSCTL_ONE,
+		.proc_handler	= sched_sibling_cluster_handler,
+		.extra1		= SYSCTL_NEG_ONE,
+		.extra2		= &three,
 	},
 	{ }
 };

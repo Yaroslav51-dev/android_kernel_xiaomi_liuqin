@@ -15,6 +15,7 @@
 #include <linux/delay.h>
 #include <linux/msm_ep_pcie.h>
 #include <linux/iommu.h>
+#include <linux/pci_regs.h>
 
 #define PCIE20_PARF_SYS_CTRL           0x00
 #define PCIE20_PARF_DB_CTRL            0x10
@@ -55,6 +56,11 @@
 #define PCIE20_PARF_CLKREQ_IN_OVERRIDE_ENABLE_DIS	0
 #define PCIE20_PARF_CLKREQ_IN_OVERRIDE_ENABLE_EN	1
 #define PCIE20_PARF_CLKREQ_OE_OVERRIDE_ENABLE	BIT(0)
+
+#define PCIE20_PARF_DEBUG_CNT_IN_L0S (0xc10)
+#define PCIE20_PARF_DEBUG_CNT_IN_L1 (0xc0c)
+#define PCIE20_PARF_DEBUG_CNT_IN_L1SUB_L1 (0xc84)
+#define PCIE20_PARF_DEBUG_CNT_IN_L1SUB_L2 (0xc88)
 
 #define PCIE20_PARF_SLV_ADDR_MSB_CTRL  0x2C0
 #define PCIE20_PARF_DBI_BASE_ADDR      0x350
@@ -114,6 +120,8 @@
 #define PCIE20_BUS_DISCONNECT_STATUS   0x68c
 #define PCIE20_ACK_F_ASPM_CTRL_REG     0x70C
 #define PCIE20_MASK_ACK_N_FTS          0xff00
+#define PCIE20_PORT_LINK_CTRL_REG      0x710
+#define PCIE20_GEN3_GEN2_CTRL          0x80C
 #define PCIE20_MISC_CONTROL_1          0x8BC
 
 #define PCIE20_PLR_IATU_VIEWPORT       0x900
@@ -180,10 +188,20 @@
 #define MAX_NAME_LEN 80
 #define MAX_IATU_ENTRY_NUM 2
 
+#define LINK_WIDTH_X1 (0x1)
+#define LINK_WIDTH_X2 (0x3)
+#define LINK_WIDTH_X4 (0x7)
+#define LINK_WIDTH_X8 (0xf)
+#define LINK_WIDTH_MASK (0x3f)
+#define LINK_WIDTH_SHIFT (16)
+
+#define NUM_OF_LANES_MASK (0x1f)
+#define NUM_OF_LANES_SHIFT (8)
+
 #define EP_PCIE_LOG_PAGES 50
 #define EP_PCIE_MAX_VREG 4
-#define EP_PCIE_MAX_CLK 14
-#define EP_PCIE_MAX_PIPE_CLK 1
+#define EP_PCIE_MAX_CLK 16
+#define EP_PCIE_MAX_PIPE_CLK 2
 #define EP_PCIE_MAX_RESET 2
 
 #define EP_PCIE_ERROR -30655
@@ -327,6 +345,8 @@ struct ep_pcie_phy_info_t {
 struct ep_pcie_dev_t {
 	struct platform_device       *pdev;
 	struct regulator             *gdsc;
+	/* Optional phy GDSC present only in few targets */
+	struct regulator             *gdsc_phy;
 	struct ep_pcie_vreg_info_t   vreg[EP_PCIE_MAX_VREG];
 	struct ep_pcie_gpio_info_t   gpio[EP_PCIE_MAX_GPIO];
 	struct ep_pcie_clk_info_t    clk[EP_PCIE_MAX_CLK];
@@ -352,6 +372,7 @@ struct ep_pcie_dev_t {
 	u16                          device_id;
 	u32                          subsystem_id;
 	u32                          link_speed;
+	u32                          link_width;
 	bool                         active_config;
 	bool                         aggregated_irq;
 	bool                         mhi_a7_irq;
@@ -394,6 +415,7 @@ struct ep_pcie_dev_t {
 	ulong                        wake_counter;
 	ulong                        msi_counter;
 	ulong                        global_irq_counter;
+	ulong                        perst_ast_in_enum_counter;
 
 	bool                         dump_conf;
 	bool                         config_mmio_init;
@@ -413,6 +435,7 @@ struct ep_pcie_dev_t {
 	bool			     conf_ipa_msi_iatu;
 
 	struct ep_pcie_register_event *event_reg;
+	struct work_struct           handle_enumeration_work;
 	struct work_struct           handle_bme_work;
 	struct work_struct           handle_d3cold_work;
 
@@ -460,6 +483,7 @@ extern int ep_pcie_get_debug_mask(void);
 extern void ep_pcie_phy_init(struct ep_pcie_dev_t *dev);
 extern bool ep_pcie_phy_is_ready(struct ep_pcie_dev_t *dev);
 extern void ep_pcie_reg_dump(struct ep_pcie_dev_t *dev, u32 sel, bool linkdown);
+extern void ep_pcie_clk_dump(struct ep_pcie_dev_t *dev);
 extern void ep_pcie_debugfs_init(struct ep_pcie_dev_t *ep_dev);
 extern void ep_pcie_debugfs_exit(void);
 
