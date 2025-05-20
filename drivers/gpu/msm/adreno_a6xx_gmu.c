@@ -6,7 +6,6 @@
 
 #include <dt-bindings/regulator/qcom,rpmh-regulator-levels.h>
 #include <linux/clk.h>
-#include <linux/clk/qcom.h>
 #include <linux/component.h>
 #include <linux/delay.h>
 #include <linux/dma-map-ops.h>
@@ -2726,8 +2725,6 @@ static int gmu_cx_gdsc_event(struct notifier_block *nb,
 static int a6xx_gmu_regulators_probe(struct a6xx_gmu_device *gmu,
 		struct platform_device *pdev)
 {
-	int ret;
-
 	gmu->cx_gdsc = devm_regulator_get(&pdev->dev, "vddcx");
 	if (IS_ERR(gmu->cx_gdsc)) {
 		if (PTR_ERR(gmu->cx_gdsc) != -EPROBE_DEFER)
@@ -2741,17 +2738,6 @@ static int a6xx_gmu_regulators_probe(struct a6xx_gmu_device *gmu,
 			dev_err(&pdev->dev, "Couldn't get the vdd gdsc\n");
 		return PTR_ERR(gmu->gx_gdsc);
 	}
-
-	gmu->gdsc_nb.notifier_call = gmu_cx_gdsc_event;
-	ret = devm_regulator_register_notifier(gmu->cx_gdsc, &gmu->gdsc_nb);
-
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to register gmu cx gdsc notifier: %d\n", ret);
-		return ret;
-	}
-
-	init_completion(&gmu->gdsc_gate);
-	complete_all(&gmu->gdsc_gate);
 
 	return 0;
 }
@@ -3254,7 +3240,10 @@ static int a6xx_first_boot(struct adreno_device *adreno_dev)
 	 */
 	device->pwrscale.devfreq_enabled = true;
 
+	device->pwrctrl.last_stat_updated = ktime_get();
+
 	kgsl_pwrctrl_set_state(device, KGSL_STATE_ACTIVE);
+
 
 	return 0;
 }

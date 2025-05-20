@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
 
+VIDEO_ROOT := $(srctree)/techpack/video
+
 ifneq ($(CONFIG_ARCH_MONACO), y)
 KBUILD_CPPFLAGS += -DCONFIG_MSM_MMRM=1
 endif
@@ -116,6 +118,8 @@ msm_video-objs += driver/variant/ar50lt/src/msm_vidc_buffer_ar50lt.o \
                   driver/variant/ar50lt/src/msm_vidc_power_ar50lt.o \
                   driver/variant/ar50lt/src/msm_vidc_ar50lt.o
 endif
+
+obj-y +=msm/
 
 msm_video-objs += driver/vidc/src/msm_vidc_v4l2.o \
                   driver/vidc/src/msm_vidc_vb2.o \

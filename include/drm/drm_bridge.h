@@ -728,6 +728,7 @@ struct drm_bridge {
 	const struct drm_bridge_funcs *funcs;
 	/** @driver_private: pointer to the bridge driver's internal context */
 	void *driver_private;
+	struct mutex lock;
 	/** @ops: bitmask of operations supported by the bridge */
 	enum drm_bridge_ops ops;
 	/**
@@ -760,6 +761,7 @@ struct drm_bridge {
 	 * @hpd_cb.
 	 */
 	void *hpd_data;
+	bool is_dsi_drm_bridge;
 };
 
 static inline struct drm_bridge *

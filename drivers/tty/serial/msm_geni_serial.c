@@ -773,7 +773,6 @@ static int vote_clock_off(struct uart_port *uport)
 	usage_count = atomic_read(&uport->dev->power.usage_count);
 	UART_LOG_DBG(port->ipc_log_pwr, uport->dev, "%s:%s ioctl:%d usage_count:%d\n",
 		__func__, current->comm, port->ioctl_count, usage_count);
-	atomic_set(&port->check_wakeup_byte, 1);
 	return 0;
 };
 
@@ -2244,7 +2243,7 @@ static int msm_geni_serial_handle_dma_rx(struct uart_port *uport, bool drop_rx)
 	struct msm_geni_serial_port *msm_port = GET_DEV_PORT(uport);
 	unsigned int rx_bytes = 0;
 	struct tty_port *tport;
-	int ret = 0, offset = 0;
+	int ret = 0;
 	unsigned int geni_status;
 
 	geni_status = geni_read_reg_nolog(uport->membase, SE_GENI_STATUS);
@@ -3931,7 +3930,6 @@ static int msm_geni_serial_probe(struct platform_device *pdev)
 	/* Complete signals to handle cancel cmd completion */
 	init_completion(&dev_port->m_cmd_timeout);
 	init_completion(&dev_port->s_cmd_timeout);
-	init_completion(&dev_port->wakeup_comp);
 
 	init_completion(&dev_port->wakeup_comp);
 	uport->private_data = (void *)drv;

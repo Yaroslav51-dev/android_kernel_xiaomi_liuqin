@@ -112,8 +112,6 @@ struct qrtr_sock {
 	struct sockaddr_qrtr peer;
 
 	int state;
-	struct task_struct *sent;
-	struct task_struct *owner;
 };
 
 static inline struct qrtr_sock *qrtr_sk(struct sock *sk)
@@ -193,7 +191,6 @@ struct qrtr_node {
 	struct kthread_work say_hello;
 
 	struct wakeup_source *ws;
-	const char *ws_name;
 	void *ilc;
 
 	struct xarray no_wake_svc; /* services that will not wake up APPS */
@@ -417,6 +414,7 @@ static void __qrtr_node_release(struct kref *kref)
 	struct qrtr_node *node = container_of(kref, struct qrtr_node, ref);
 	unsigned long flags;
 	void __rcu **slot;
+
 	spin_lock_irqsave(&qrtr_nodes_lock, flags);
 	if (node->nid != QRTR_EP_NID_AUTO) {
 		radix_tree_for_each_slot(slot, &qrtr_nodes, &iter, 0) {
@@ -867,42 +865,6 @@ static void qrtr_backup_deinit(void)
 }
 
 /**
- * change qrtr_ws name to last changed one who's net_id/port
- */
-#define MAX_QRTR_WS_NAME 256
-
-static void qrtr_debug_change_ws_name(struct qrtr_node *node,
-		int src_node, int src_port,
-		int dst_node, int dst_port,
-		struct task_struct *sent,
-		struct task_struct *owner)
-{
-	if (node->ws->name != node->ws_name) {
-		pr_err("qrtr: alloc new buffer for ws name(%d)\n", !!node->ws_name);
-
-		if (node->ws_name)
-			kfree_const(node->ws_name);
-
-		node->ws_name = kmalloc(MAX_QRTR_WS_NAME, GFP_ATOMIC);
-		if (!node->ws_name) {
-			pr_err("qrtr: couldn't alloc enough memory for ws name\n");
-			return;
-		}
-
-		kfree_const(node->ws->name);
-		node->ws->name = node->ws_name;
-	}
-
-	snprintf((char *)node->ws_name, MAX_QRTR_WS_NAME - 1,
-			"qrtr_ws_src_%d_%d_dst_%d_%d_svc_%d_%d_sent_%d_%s_owner_%d_%s",
-			src_node, src_port, dst_node, dst_port,
-			qrtr_get_service_id(dst_node, dst_port),
-			qrtr_get_service_id(src_node, src_port),
-			(sent ? sent->pid : -1), (sent ? sent->comm : ""),
-			(owner ? owner->pid : -1), (owner ? owner->comm : ""));
-}
-
-/**
  * qrtr_endpoint_post() - post incoming data
  * @ep: endpoint handle
  * @data: data pointer
@@ -1018,8 +980,6 @@ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len)
 	 */
 	svc_id = qrtr_get_service_id(cb->src_node, cb->src_port);
 	if (cb->type != QRTR_TYPE_DATA || cb->dst_node != qrtr_local_nid) {
-		qrtr_debug_change_ws_name(node, cb->src_node, cb->src_port,
-				cb->dst_node, cb->dst_port, NULL, NULL);
 		skb_queue_tail(&node->rx_queue, skb);
 		kthread_queue_work(&node->kworker, &node->read_data);
 		pm_wakeup_ws_event(node->ws, qrtr_wakeup_ms, true);
@@ -1029,10 +989,6 @@ int qrtr_endpoint_post(struct qrtr_endpoint *ep, const void *data, size_t len)
 			kfree_skb(skb);
 			return -ENODEV;
 		}
-
-		if (!xa_load(&node->no_wake_svc, svc_id))
-			qrtr_debug_change_ws_name(node, cb->src_node, cb->src_port,
-					cb->dst_node, cb->dst_port, NULL, NULL);
 
 		if (sock_queue_rcv_skb(&ipc->sk, skb)) {
 			qrtr_port_put(ipc);
@@ -1842,7 +1798,6 @@ static int qrtr_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 		qrtr_node_release(srv_node);
 	}
 
-	ipc->sent = current;
 	rc = enqueue_fn(node, skb, type, &ipc->us, addr, msg->msg_flags);
 	if (rc >= 0)
 		rc = len;
@@ -1872,7 +1827,7 @@ static int qrtr_send_resume_tx(struct qrtr_cb *cb)
 		qrtr_log_resume_tx(cb->src_node, cb->src_port,
 				   RTX_CTRL_SKB_ALLOC_FAIL);
 		qrtr_node_release(node);
- 		return -ENOMEM;
+		return -ENOMEM;
 	}
 
 	pkt->cmd = cpu_to_le32(QRTR_TYPE_RESUME_TX);
@@ -2147,7 +2102,6 @@ static int qrtr_create(struct net *net, struct socket *sock,
 	ipc->us.sq_node = qrtr_local_nid;
 	ipc->us.sq_port = 0;
 	ipc->state = QRTR_STATE_INIT;
-	ipc->owner = current;
 
 	return 0;
 }
@@ -2170,22 +2124,16 @@ static int __init qrtr_proto_init(void)
 		return rc;
 
 	rc = sock_register(&qrtr_family);
-	if (rc)
-		goto err_proto;
+	if (rc) {
+		proto_unregister(&qrtr_proto);
+		return rc;
+	}
 
-	rc = qrtr_ns_init();
-	if (rc)
-		goto err_sock;
+	qrtr_ns_init();
 
 	qrtr_backup_init();
 	qrtr_debug_init();
 
-	return 0;
-
-err_sock:
-	sock_unregister(qrtr_family.family);
-err_proto:
-	proto_unregister(&qrtr_proto);
 	return rc;
 }
 postcore_initcall(qrtr_proto_init);

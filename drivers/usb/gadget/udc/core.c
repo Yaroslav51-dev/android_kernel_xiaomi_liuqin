@@ -101,10 +101,12 @@ int usb_ep_enable(struct usb_ep *ep)
 		goto out;
 
 	/* UDC drivers can't handle endpoints with maxpacket size 0 */
-	if (!ep->desc || usb_endpoint_maxp(ep->desc) == 0) {
-		WARN_ONCE(1, "%s: ep%d (%s) has %s\n", __func__, ep->address, ep->name,
-			  (!ep->desc) ? "NULL descriptor" : "maxpacket 0");
-
+	if (usb_endpoint_maxp(ep->desc) == 0) {
+		/*
+		 * We should log an error message here, but we can't call
+		 * dev_err() because there's no way to find the gadget
+		 * given only ep.
+		 */
 		ret = -EINVAL;
 		goto out;
 	}
@@ -273,9 +275,7 @@ int usb_ep_queue(struct usb_ep *ep,
 {
 	int ret = 0;
 
-	if (!ep->enabled && ep->address) {
-		pr_debug("USB gadget: queue request to disabled ep 0x%x (%s)\n",
-				 ep->address, ep->name);
+	if (WARN_ON_ONCE(!ep->enabled && ep->address)) {
 		ret = -ESHUTDOWN;
 		goto out;
 	}
@@ -1185,22 +1185,6 @@ static inline void usb_gadget_udc_set_speed(struct usb_udc *udc,
 		gadget->ops->udc_set_ssp_rate(gadget, gadget->max_ssp_rate);
 	else if (gadget->ops->udc_set_speed)
 		gadget->ops->udc_set_speed(gadget, s);
-}
-
-static inline void usb_gadget_enable_async_callbacks(struct usb_udc *udc)
-{
-        struct usb_gadget *gadget = udc->gadget;
-
-        if (gadget->ops->udc_async_callbacks)
-                gadget->ops->udc_async_callbacks(gadget, true);
-}
-
-static inline void usb_gadget_disable_async_callbacks(struct usb_udc *udc)
-{
-        struct usb_gadget *gadget = udc->gadget;
-
-        if (gadget->ops->udc_async_callbacks)
-                gadget->ops->udc_async_callbacks(gadget, false);
 }
 
 /**
