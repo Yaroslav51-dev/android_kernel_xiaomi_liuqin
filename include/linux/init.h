@@ -249,7 +249,6 @@ extern bool initcall_debug;
 		__attribute__((__section__(__sec))) = fn;
 #endif
 
-<<<<<<< HEAD
 #define __unique_initcall(fn, id, __sec, __iid)			\
 	____define_initcall(fn,					\
 		__initcall_stub(fn, __iid, id),			\
