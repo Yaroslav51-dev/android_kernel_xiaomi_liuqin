@@ -456,8 +456,7 @@ static int msm_minidump_add_header(void)
 	struct elf_shdr *shdr;
 	struct elf_phdr *phdr;
 	unsigned int strtbl_off, elfh_size, phdr_off;
-	char *banner;
-	size_t linux_banner_len = strlen(linux_banner);
+	char *banner, *linux_banner;
 
 	linux_banner = android_debug_symbol(ADS_LINUX_BANNER);
 	/* Header buffer contains:
@@ -529,7 +528,7 @@ static int msm_minidump_add_header(void)
 
 	/* 4th section is linux banner */
 	banner = (char *)ehdr + strtbl_off + MAX_STRTBL_SIZE;
-	strlcpy(banner, linux_banner, linux_banner_len + 1);
+	strlcpy(banner, linux_banner, MAX_STRTBL_SIZE);
 
 	shdr->sh_type = SHT_PROGBITS;
 	shdr->sh_offset = (elf_addr_t)(strtbl_off + MAX_STRTBL_SIZE);
